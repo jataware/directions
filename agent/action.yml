@@ -1,0 +1,104 @@
+name: Directions Agent
+description: Run one task through pinned Pi and workflow-approved ordinary extensions.
+author: Jataware
+inputs:
+  task:
+    description: Trusted task instructions. Repository and PR text remain untrusted data.
+    required: true
+  model:
+    description: Pi catalog provider/model override. Never selected by repository config.
+    required: false
+    default: openai/gpt-6.1-sol
+  api-key:
+    description: Credential for the selected provider.
+    required: true
+  profile:
+    description: Directions profile to load from the inspected workspace.
+    default: default
+  thinking:
+    description: Pi thinking level (off, minimal, low, medium, high, xhigh, max).
+    default: "off"
+  workspace:
+    description: Checkout containing guidance. No code from this directory is executed.
+    default: ${{ github.workspace }}
+  extensions:
+    description: Newline-separated absolute paths to trusted Pi extension files or packages outside the inspected workspace. Install dependencies separately using a reviewed lockfile.
+    required: false
+  github-capabilities:
+    description: Comma-separated read, review-propose, review-publish, comment-propose, comment-publish. Empty disables GitHub tools.
+    required: false
+  github-review-events:
+    description: Allowed review outcomes. Approvals and change requests require explicit opt-in.
+    default: COMMENT
+  github-token:
+    description: Least-privileged token for explicitly enabled GitHub capabilities.
+    default: ${{ github.token }}
+  pull-request:
+    description: PR number for workflow_dispatch. Other supported events bind to their own PR.
+    required: false
+  timeout-seconds:
+    description: Whole task deadline, including preparation, 1-1800 seconds.
+    default: "600"
+  max-turns:
+    description: Maximum model turns, 1-100.
+    default: "16"
+outputs:
+  artifact-directory:
+    description: Private runner directory containing response.md, run.json, and optional github.json. Upload explicitly if desired.
+    value: ${{ steps.run.outputs.artifact-directory }}
+  response-file:
+    description: Final Markdown response path (exists only after successful completion).
+    value: ${{ steps.run.outputs.response-file }}
+  run-file:
+    description: Run metadata and status path.
+    value: ${{ steps.run.outputs.run-file }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: "24"
+    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      with:
+        go-version: "1.24.x"
+        cache: false
+    - name: Install locked action runtime
+      shell: bash
+      run: npm ci --prefix "$GITHUB_ACTION_PATH/.." --ignore-scripts --no-audit --no-fund
+    - name: Build trusted Directions client
+      id: client
+      shell: bash
+      run: |
+        directory="$(mktemp -d "$RUNNER_TEMP/directions-bin-XXXXXX")"
+        printf 'directory=%s\n' "$directory" >> "$GITHUB_OUTPUT"
+        cd "$GITHUB_ACTION_PATH/../clients/cli"
+        go build -o "$directory/directions" .
+      env:
+        GOWORK: "off"
+        GOENV: "off"
+        GOTOOLCHAIN: local
+    - name: Run task
+      id: run
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/main.mjs"
+      env:
+        DIRECTIONS_BIN: ${{ steps.client.outputs.directory }}/directions
+        INPUT_TASK: ${{ inputs.task }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_API_KEY: ${{ inputs.api-key }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_THINKING: ${{ inputs.thinking }}
+        INPUT_WORKSPACE: ${{ inputs.workspace }}
+        INPUT_EXTENSIONS: ${{ inputs.extensions }}
+        INPUT_GITHUB_CAPABILITIES: ${{ inputs.github-capabilities }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_GITHUB_REVIEW_EVENTS: ${{ inputs.github-review-events }}
+        INPUT_PULL_REQUEST: ${{ inputs.pull-request }}
+        INPUT_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        INPUT_MAX_TURNS: ${{ inputs.max-turns }}
+    - name: Remove temporary executable
+      if: ${{ always() && steps.client.outputs.directory != '' }}
+      shell: bash
+      run: rm -rf -- "$DIRECTORY"
+      env:
+        DIRECTORY: ${{ steps.client.outputs.directory }}

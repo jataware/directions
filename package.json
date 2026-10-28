@@ -1,0 +1,19 @@
+{
+  "name": "@jataware/directions-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "agent",
+    "tools/pi/github"
+  ],
+  "scripts": {
+    "test": "node --test agent/*.test.mjs tools/pi/github/*.test.mjs",
+    "check": "npm test"
+  },
+  "devDependencies": {
+    "yaml": "2.9.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

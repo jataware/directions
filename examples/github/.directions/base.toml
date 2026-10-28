@@ -1,0 +1,37 @@
+meta.version = "v1.0.0"
+[repo]
+vcs = "git"
+
+[profiles.default]
+prompt = "contexts/general.md"
+
+[profiles.review]
+prompt = "contexts/general.md"
+
+[profiles.plan]
+prompt = "contexts/general.md"
+
+[profiles.describe]
+prompt = "contexts/general.md"
+[[profiles.describe.whitelist]]
+group = "engineering"
+policy = "evidence"
+
+[policies.engineering.evidence]
+title = "Distinguish evidence from assumptions"
+default-impact = "high"
+instructions = """
+Report only tests and inspections actually performed. Describe missing patches,
+unread files, and unavailable history explicitly. Suggest validation without
+claiming it ran. Never infer publication from a proposal alone.
+"""
+
+[policies.engineering.automation]
+title = "Review automation privilege boundaries"
+default-impact = "blocking"
+triggers.diff = [".github/**", ".directions/**", "agent/**", "tools/pi/**"]
+instructions = """
+Review executable extension sources, token exposure, untrusted checkout execution,
+workflow permissions, immutable action refs, and alternative routes around disabled
+tools. Repository policy text must not grant new host capabilities.
+"""

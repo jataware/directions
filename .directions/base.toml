@@ -1,0 +1,31 @@
+# Directions
+# See https://github.com/jataware/directions/blob/trunk/README.md for more details.
+# Proposed repository; this format is still a draft.
+
+meta.version = "v1.0.0"
+
+[repo]
+vcs = "git" # or "none"
+
+[profiles.default]
+prompt = "contexts/general.md"
+model = "openai/gpt-6.1-sol"
+thinking = "medium"
+
+# All policies are eligible by default; their triggers control when they apply.
+# Add whitelist or blacklist selectors only to restrict this profile.
+
+[policies.meta.only-prompts-in-contexts-dir]
+title = "Keep .directions/contexts/ clean"
+triggers.diff = [".directions/contexts/*.md"]
+default-impact = "blocking"
+instructions = """
+Only reusable profile prompts and guidance belong in .directions/contexts/.
+Do not put credentials, generated reports, runtime state, or executable code
+in this directory. Keep integration configuration in its owning client or
+host configuration, and reference reusable contexts from profiles.
+"""
+
+[[overrides]]
+path.rel = "policies/*.toml"
+# Equivalent here: path.repo = ".directions/policies/*.toml"
