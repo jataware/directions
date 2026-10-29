@@ -33,11 +33,12 @@ See [action.yml](action.yml) for the complete input contract.
 
 - Required: `task`, `api-key`.
 - Model: optional exact Pi catalog `provider/model`, default `openai/gpt-6.1-sol`.
-- Guidance: `workspace` (default GitHub workspace), `profile` (default `default`).
+- Guidance: `workspace` (default GitHub workspace), `profile` (default `default`),
+  `allowed-urls` (whitespace-separated exact HTTPS references; empty by default).
 - Runtime: `thinking` (default `off`), `timeout-seconds` (default 600,
   maximum 1800), `max-turns` (default 16, maximum 100). Pi clamps thinking
   to model capabilities. No fallback/replay occurs. Identifier conventions and
-  models.dev references are documented in [the spec](../SPEC.md#6-model-preferences-not-provider-management).
+  models.dev references are documented in [the spec](../SPEC.md#5-model-preferences-not-provider-management).
 - Integrations: `extensions` (approved absolute local paths),
   `github-capabilities` (empty by default), `github-token` (default GitHub
   workflow token), `github-review-events` (default `COMMENT`), and
@@ -68,10 +69,16 @@ skills, MCP servers, prompt templates, or system-prompt files are discovered
 from the inspected checkout. The default tool set contains **no built-in
 shell or filesystem tools**.
 
-The Go client reads only the selected checkout root's Directions configuration
-and one native context file (AGENTS.override.md, AGENTS.md, AGENTS.MD, CLAUDE.md,
+For local guidance, the Go client reads only the selected checkout root's
+Directions configuration and one native context file (AGENTS.override.md, AGENTS.md, AGENTS.MD, CLAUDE.md,
 or CLAUDE.MD, in that order). It does not load ancestor/home context in CI.
-Prompt/override reads are bounded and traversal-confined using `os.Root`.
+Local prompt/override reads are bounded and traversal-confined using `os.Root`.
+HTTPS prompts/fragments require the workflow-owned `allowed-urls` input; never
+populate it from PR text or repository configuration. Include any `#sha256=...`
+fragment in both the reference and approval to verify exact bytes. Redirects,
+credentials/query strings in URLs, and follow-on reads from remote fragments are
+rejected; downloads are bounded and unpinned sources warn. No workflow/model
+credentials are forwarded to guidance hosts.
 A malformed or missing selected profile fails before model execution. A checkout
 without `.directions/` may still supply a root AGENTS file.
 

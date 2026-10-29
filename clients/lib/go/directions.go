@@ -1,12 +1,12 @@
-// Package directions parses draft Directions documents and assembles bounded,
-// repository-local guidance. Parsing is pure; InitialContext reads configuration,
-// prompt files, and local Git filenames, but never credentials or instructions as code.
+// Package directions parses draft Directions documents and assembles bounded
+// guidance. Parsing is pure; BuildContext reads local files and host-approved
+// HTTPS sources, but never credentials or instructions as code.
 package directions
 
 import (
 	"bytes"
 	"fmt"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strings"
 	"unicode"
@@ -24,26 +24,18 @@ type Repo struct {
 	VCS string `toml:"vcs"`
 }
 
-// Path contains exactly one anchor. Resolution is lexical, not authorization.
-type Path struct {
-	Rel  string `toml:"rel"`
-	Repo string `toml:"repo"`
-	Home string `toml:"home"`
-	Root string `toml:"root"`
-}
-
 type PolicyRef struct {
 	Group  string `toml:"group"`
 	Policy string `toml:"policy"`
 }
 
 type Profile struct {
-	Prompt   *Path
-	Model    string
-	Thinking string
+	Prompt   string `toml:"prompt"` // project-root-relative path or HTTPS URL
+	Model    string `toml:"model"`
+	Thinking string `toml:"thinking"`
 	// nil means absent; a pointer to an empty slice is an explicit empty list.
-	Whitelist *[]PolicyRef
-	Blacklist *[]PolicyRef
+	Whitelist *[]PolicyRef `toml:"whitelist"`
+	Blacklist *[]PolicyRef `toml:"blacklist"`
 }
 
 type Policy struct {
@@ -56,29 +48,13 @@ type Policy struct {
 }
 
 type Override struct {
-	Path Path `toml:"path"`
+	Path string `toml:"path"` // project-root-relative file/glob or HTTPS URL
 }
 
 type Document struct {
-	Meta      *Meta
-	Repo      *Repo
-	Profiles  map[string]Profile
-	Policies  map[string]map[string]Policy
-	Overrides []Override
-}
-
-type rawProfile struct {
-	Prompt    any          `toml:"prompt"`
-	Model     string       `toml:"model"`
-	Thinking  string       `toml:"thinking"`
-	Whitelist *[]PolicyRef `toml:"whitelist"`
-	Blacklist *[]PolicyRef `toml:"blacklist"`
-}
-
-type rawDocument struct {
 	Meta      *Meta                        `toml:"meta"`
 	Repo      *Repo                        `toml:"repo"`
-	Profiles  map[string]rawProfile        `toml:"profiles"`
+	Profiles  map[string]Profile           `toml:"profiles"`
 	Policies  map[string]map[string]Policy `toml:"policies"`
 	Overrides []Override                   `toml:"overrides"`
 }
@@ -94,26 +70,18 @@ func decode(data []byte, target any) error {
 	return toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(target)
 }
 
-func decodeValue(value any, target any) error {
-	data, err := toml.Marshal(value)
-	if err != nil {
-		return err
-	}
-	return decode(data, target)
-}
-
 func parse(data []byte, fragment bool) (*Document, error) {
-	var raw rawDocument
-	if err := decode(data, &raw); err != nil {
+	var doc Document
+	if err := decode(data, &doc); err != nil {
 		return nil, fmt.Errorf("TOML: %w", err)
 	}
-	if !fragment && (raw.Meta == nil || raw.Repo == nil) {
+	if !fragment && (doc.Meta == nil || doc.Repo == nil) {
 		return nil, fmt.Errorf("base document requires meta.version and repo.vcs")
 	}
-	if raw.Meta != nil && raw.Meta.Version != Version {
-		return nil, fmt.Errorf("unsupported meta.version %q", raw.Meta.Version)
+	if doc.Meta != nil && doc.Meta.Version != Version {
+		return nil, fmt.Errorf("unsupported meta.version %q", doc.Meta.Version)
 	}
-	if raw.Repo != nil && raw.Repo.VCS != "git" && raw.Repo.VCS != "none" {
+	if doc.Repo != nil && doc.Repo.VCS != "git" && doc.Repo.VCS != "none" {
 		return nil, fmt.Errorf("repo.vcs must be git or none")
 	}
 	// Presence, even when empty, is invalid for fragments.
@@ -127,42 +95,22 @@ func parse(data []byte, fragment bool) (*Document, error) {
 	if _, exists := keys["overrides"]; fragment && exists {
 		return nil, fmt.Errorf("fragments cannot declare overrides")
 	}
-	doc := &Document{
-		Meta: raw.Meta, Repo: raw.Repo, Policies: raw.Policies,
-		Overrides: raw.Overrides, Profiles: map[string]Profile{},
-	}
-	for name, p := range raw.Profiles {
+	for name, profile := range doc.Profiles {
 		if !validName(name) {
 			return nil, fmt.Errorf("invalid profile name %q", name)
 		}
-		profile := Profile{Model: p.Model, Thinking: p.Thinking, Whitelist: p.Whitelist, Blacklist: p.Blacklist}
-		if p.Whitelist != nil && p.Blacklist != nil {
+		if profile.Whitelist != nil && profile.Blacklist != nil {
 			return nil, fmt.Errorf("profiles.%s cannot declare both whitelist and blacklist", name)
 		}
-		if p.Model != "" && !validModelRef(p.Model) {
+		if profile.Model != "" && !validModelRef(profile.Model) {
 			return nil, fmt.Errorf("profiles.%s model must be a qualified provider/model reference", name)
 		}
-		if p.Thinking != "" && strings.TrimSpace(p.Thinking) == "" {
-			return nil, fmt.Errorf("profiles.%s has an empty thinking hint", name)
-		}
-		if p.Prompt != nil {
-			path := Path{}
-			switch value := p.Prompt.(type) {
-			case string:
-				path.Rel = value
-			case map[string]any:
-				if err := decodeValue(value, &path); err != nil {
-					return nil, fmt.Errorf("profiles.%s.prompt: %w", name, err)
-				}
-			default:
-				return nil, fmt.Errorf("profiles.%s.prompt must be a string or typed path", name)
-			}
-			if err := path.Validate(); err != nil {
+		if profile.Prompt != "" {
+			if err := validateReference(profile.Prompt); err != nil {
 				return nil, fmt.Errorf("profiles.%s.prompt: %w", name, err)
 			}
-			profile.Prompt = &path
 		}
-		for _, list := range []*[]PolicyRef{p.Whitelist, p.Blacklist} {
+		for _, list := range []*[]PolicyRef{profile.Whitelist, profile.Blacklist} {
 			if list == nil {
 				continue
 			}
@@ -172,9 +120,8 @@ func parse(data []byte, fragment bool) (*Document, error) {
 				}
 			}
 		}
-		doc.Profiles[name] = profile
 	}
-	for group, policies := range raw.Policies {
+	for group, policies := range doc.Policies {
 		if !validName(group) {
 			return nil, fmt.Errorf("invalid policy group %q", group)
 		}
@@ -192,19 +139,19 @@ func parse(data []byte, fragment bool) (*Document, error) {
 					return nil, fmt.Errorf("policies.%s.%s requires nonempty triggers.diff", group, name)
 				}
 				for _, pattern := range policy.Triggers.Diff {
-					if err := (Path{Repo: pattern}).Validate(); err != nil {
+					if err := validateLocalPath(pattern); err != nil {
 						return nil, fmt.Errorf("policies.%s.%s triggers.diff: %w", group, name, err)
 					}
 				}
 			}
 		}
 	}
-	for i, override := range raw.Overrides {
-		if err := override.Path.Validate(); err != nil {
+	for i, override := range doc.Overrides {
+		if err := validateReference(override.Path); err != nil {
 			return nil, fmt.Errorf("overrides[%d]: %w", i, err)
 		}
 	}
-	return doc, nil
+	return &doc, nil
 }
 
 // Validate explicit empty values separately: Go string fields otherwise cannot
@@ -221,29 +168,11 @@ func validateExplicitValues(keys map[string]any) error {
 		}
 		return nil
 	}
-	checkPath := func(value any) error {
-		path, ok := value.(map[string]any)
-		if !ok || len(path) != 1 {
-			return fmt.Errorf("typed path requires exactly one key")
-		}
-		for _, value := range path {
-			text, ok := value.(string)
-			if !ok || strings.TrimSpace(text) == "" {
-				return fmt.Errorf("typed path requires a nonempty string")
-			}
-		}
-		return nil
-	}
 	profiles, _ := keys["profiles"].(map[string]any)
 	for _, value := range profiles {
 		profile, _ := value.(map[string]any)
-		if err := checkStrings(profile, "model", "thinking"); err != nil {
+		if err := checkStrings(profile, "prompt", "model", "thinking"); err != nil {
 			return err
-		}
-		if prompt, ok := profile["prompt"].(map[string]any); ok {
-			if err := checkPath(prompt); err != nil {
-				return err
-			}
 		}
 		_, whitelist := profile["whitelist"]
 		_, blacklist := profile["blacklist"]
@@ -258,13 +187,6 @@ func validateExplicitValues(keys map[string]any) error {
 					return err
 				}
 			}
-		}
-	}
-	overrides, _ := keys["overrides"].([]any)
-	for _, value := range overrides {
-		override, _ := value.(map[string]any)
-		if err := checkPath(override["path"]); err != nil {
-			return err
 		}
 	}
 	groups, _ := keys["policies"].(map[string]any)
@@ -289,69 +211,17 @@ func validModelRef(ref string) bool {
 	return ok && validName(provider) && model != "" && strings.IndexFunc(ref, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
 }
 
-// Validate checks shape and lexical containment; it does not inspect a filesystem.
-// Relative paths use portable forward slashes. Root paths use native absolute syntax.
-func (p Path) Validate() error {
-	count := 0
-	for _, value := range []string{p.Rel, p.Repo, p.Home, p.Root} {
-		if value != "" {
-			count++
-			if strings.TrimSpace(value) == "" || strings.ContainsRune(value, 0) {
-				return fmt.Errorf("path must be nonempty and contain no NUL")
-			}
-		}
+// validateLocalPath checks portable project-relative syntax, not filesystem access.
+func validateLocalPath(value string) error {
+	if strings.TrimSpace(value) == "" || strings.ContainsRune(value, 0) {
+		return fmt.Errorf("path must be nonempty and contain no NUL")
 	}
-	if count != 1 {
-		return fmt.Errorf("path requires exactly one of rel, repo, home, root")
+	if strings.ContainsAny(value, "\\:") || strings.HasPrefix(value, "~") || path.IsAbs(value) {
+		return fmt.Errorf("paths must be project-root-relative with forward slashes; absolute paths, tilde expansion and URLs are unsupported")
 	}
-	if p.Root != "" {
-		if !filepath.IsAbs(p.Root) {
-			return fmt.Errorf("root path must be absolute")
-		}
-		return nil
-	}
-	value := p.Rel
-	if p.Repo != "" {
-		value = p.Repo
-	}
-	if p.Home != "" {
-		value = p.Home
-	}
-	// Reject drive, URI, tilde and backslash forms instead of interpreting them.
-	if strings.ContainsAny(value, "\\:") || strings.HasPrefix(value, "~") || filepath.IsAbs(value) {
-		return fmt.Errorf("relative paths must use forward slashes without absolute, tilde or URI syntax")
-	}
-	clean := filepath.Clean(filepath.FromSlash(value))
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("path escapes its anchor")
+	clean := path.Clean(value)
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("path escapes the project root")
 	}
 	return nil
-}
-
-// Anchors are explicit absolute directories supplied by a trusted host.
-// FileDir is the directory containing the document which declared the path.
-type Anchors struct {
-	FileDir string
-	Repo    string
-	Home    string
-}
-
-func ResolvePath(p Path, anchors Anchors) (string, error) {
-	if err := p.Validate(); err != nil {
-		return "", err
-	}
-	if p.Root != "" {
-		return filepath.Clean(p.Root), nil
-	}
-	anchor, value := anchors.FileDir, p.Rel
-	if p.Repo != "" {
-		anchor, value = anchors.Repo, p.Repo
-	}
-	if p.Home != "" {
-		anchor, value = anchors.Home, p.Home
-	}
-	if !filepath.IsAbs(anchor) {
-		return "", fmt.Errorf("selected anchor must be an explicit absolute directory")
-	}
-	return filepath.Join(anchor, filepath.FromSlash(value)), nil
 }

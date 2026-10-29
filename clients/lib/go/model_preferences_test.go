@@ -40,7 +40,7 @@ func TestProviderConfigurationIsRejected(t *testing.T) {
 		}
 	}
 	root := t.TempDir()
-	put(t, root, ".directions/base.toml", minimal+"[profiles.default]\n[[overrides]]\npath.rel=\"provider.toml\"")
+	put(t, root, ".directions/base.toml", minimal+"[profiles.default]\n[[overrides]]\npath=\".directions/provider.toml\"")
 	put(t, root, ".directions/provider.toml", "[providers.openai]")
 	if _, err := BuildContext(context.Background(), root, ContextOptions{ExactRoot: true}); err == nil {
 		t.Fatal("provider config loaded through override")

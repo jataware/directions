@@ -24,7 +24,7 @@ async function fixture() {
 [repo]
 vcs="none"
 [profiles.review]
-prompt="contexts/review.md"
+prompt=".directions/contexts/review.md"
 [[profiles.review.whitelist]]
 group="code"
 [policies.code.source]
@@ -87,6 +87,8 @@ test("inputs reject unsafe events/limits; redaction and approved extension paths
   const defaults = inputs({ INPUT_TASK: "Task" });
   assert.equal(DEFAULT_MODEL, "openai/gpt-6.1-sol");
   assert.equal(defaults.model, DEFAULT_MODEL);
+  assert.deepEqual(defaults.allowedURLs, []);
+  assert.deepEqual(inputs({ ...basic, INPUT_ALLOWED_URLS: "https://example.invalid/a\nhttps://example.invalid/b" }).allowedURLs, ["https://example.invalid/a", "https://example.invalid/b"]);
   assert.equal(defaults.provider, "openai");
   assert.equal(defaults.modelID, "gpt-6.1-sol");
   assert.equal(inputs({ INPUT_TASK: "Task", INPUT_MODEL: "" }).model, DEFAULT_MODEL);
@@ -152,10 +154,12 @@ export default function(pi) {
 });
 
 test("provider errors, invalid configuration, and turn limits fail rather than accepting a prior response", async () => {
-  for (const scenario of ["invalid-config", "turn-limit", "provider-error", "provider-length"]) {
+  for (const scenario of ["invalid-config", "invalid-url-approval", "unapproved-url", "turn-limit", "provider-error", "provider-length"]) {
     const f = await fixture(), github = githubFixture();
     const server = await modelServer(() => scenario === "provider-error" ? { status: 400 } : scenario === "provider-length" ? { delta: { content: "Incomplete response" }, finish: "length" } : tool("github_read_pr", {}, "repeat"));
     if (scenario === "invalid-config") f.config.profile = "missing";
+    else if (scenario === "invalid-url-approval") f.config.allowedURLs = ["http://example.invalid/not-https"];
+    else if (scenario === "unapproved-url") await writeFile(join(f.workspace, ".directions/base.toml"), 'meta.version="v1.0.0"\n[repo]\nvcs="none"\n[profiles.review]\nprompt="https://example.invalid/unapproved"\n');
     else if (scenario === "turn-limit") f.config.maxTurns = 1;
     try {
       await assert.rejects(runAgent(f.config, f.output, { configureModel: server.configureModel,
@@ -163,7 +167,7 @@ test("provider errors, invalid configuration, and turn limits fail rather than a
       }));
       const metadata = JSON.parse(await readFile(join(f.output, "run.json"), "utf8"));
       assert.equal(metadata.status, "failed");
-      assert.equal(server.requests.length, scenario === "invalid-config" ? 0 : 1);
+      assert.equal(server.requests.length, ["invalid-config", "invalid-url-approval", "unapproved-url"].includes(scenario) ? 0 : 1);
       await assert.rejects(readFile(join(f.output, "response.md")));
     } finally { await server.close(); await f.close(); }
   }

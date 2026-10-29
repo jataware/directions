@@ -56,6 +56,11 @@ an empty policies directory, and refuses to replace an existing
 `.directions/` entry (including symlinks). It does not install software,
 read credentials, execute repository code, or modify GitHub workflows.
 Review the example model preference and configure your client separately.
+Prompt and override references are plain strings: local paths relative to the
+selected project root (such as `.directions/contexts/general.md`, never relative
+to the TOML file), or HTTPS URLs. Absolute filesystem paths and the old path
+objects are unsupported. HTTPS loading is off until the host approves each exact
+reference; see [source loading](SPEC.md#4-overrides-proposed-composition).
 
 ## Go CLI
 
@@ -81,8 +86,10 @@ Git boundaries), composes local overrides, loads the default prompt, and selects
 policies using the local staged/unstaged/untracked diff. It returns JSON for
 adapters without runtime preferences or credentials in model context. Optional host flags:
 `--profile NAME`, `--diff-file JSON` (array of changed paths), `--agents` (one
-root context file), and `--exact-root` (no ancestor discovery). The action uses
-these flags so a trusted guidance checkout and a pinned PR diff remain separate.
+root context file), `--exact-root` (no ancestor discovery), and repeatable
+`--allow-url URL` (exact HTTPS approvals, including any `#sha256=...` fragment).
+The action uses these flags so a trusted guidance checkout and a pinned PR diff
+remain separate.
 
 ## Model preferences
 

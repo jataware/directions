@@ -2,7 +2,6 @@ package directions
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,7 +17,7 @@ func TestStarter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Profiles["default"].Prompt.Rel != "contexts/general.md" ||
+	if doc.Profiles["default"].Prompt != ".directions/contexts/general.md" ||
 		doc.Profiles["default"].Model != "openai/gpt-6.1-sol" ||
 		doc.Policies["meta"]["only-prompts-in-contexts-dir"].DefaultImpact != "blocking" {
 		t.Fatalf("unexpected parsed starter: %#v", doc)
@@ -53,6 +52,10 @@ func TestInvalidDocuments(t *testing.T) {
 		"empty trigger":         minimal + "[policies.meta.test]\ntitle=\"Test\"\ninstructions=\"Do this\"\ntriggers.diff=[]",
 		"invalid trigger":       minimal + "[policies.meta.test]\ntitle=\"Test\"\ninstructions=\"Do this\"\ntriggers.diff=[\"../x\"]",
 		"empty override":        minimal + "[[overrides]]",
+		"empty override path":   minimal + "[[overrides]]\npath=\"\"",
+		"invalid override type": minimal + "[[overrides]]\npath=2",
+		"insecure override":     minimal + "[[overrides]]\npath=\"http://example.invalid/policy.toml\"",
+		"insecure prompt":       minimal + "[profiles.default]\nprompt=\"http://example.invalid/context.md\"",
 		"unknown override":      minimal + "[[overrides]]\npath.bad=\"x\"",
 	}
 	for name, data := range tests {
@@ -64,53 +67,40 @@ func TestInvalidDocuments(t *testing.T) {
 	}
 }
 
-func TestFragmentAndTypedPrompt(t *testing.T) {
+func TestFragmentAndPlainPrompt(t *testing.T) {
 	if _, err := ParseFragment([]byte("[policies.meta.test]\ntitle=\"Test\"\ninstructions=\"Do this\"")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ParseFragment([]byte("[[overrides]]\npath.rel=\"x.toml\"")); err == nil {
+	if _, err := ParseFragment([]byte("[[overrides]]\npath=\"x.toml\"")); err == nil {
 		t.Fatal("nested overrides accepted")
 	}
-	doc, err := Parse([]byte(minimal + "[profiles.default.prompt]\nrepo=\"docs/context.md\""))
+	doc, err := Parse([]byte(minimal + "[profiles.default]\nprompt=\"docs/context.md\"\n[[overrides]]\npath=\".directions/policies/*.toml\""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Profiles["default"].Prompt.Repo != "docs/context.md" {
-		t.Fatal("typed prompt lost")
+	if doc.Profiles["default"].Prompt != "docs/context.md" || doc.Overrides[0].Path != ".directions/policies/*.toml" {
+		t.Fatal("plain path lost")
 	}
 }
 
-func TestResolvePaths(t *testing.T) {
-	base := t.TempDir()
-	anchors := Anchors{FileDir: filepath.Join(base, ".directions"), Repo: base, Home: filepath.Join(base, "home")}
-	for _, tc := range []struct {
-		path Path
-		want string
-	}{
-		{Path{Rel: "contexts/a.md"}, filepath.Join(anchors.FileDir, "contexts/a.md")},
-		{Path{Repo: ".directions/policies/*.toml"}, filepath.Join(base, ".directions/policies/*.toml")},
-		{Path{Home: ".config/directions/local.toml"}, filepath.Join(anchors.Home, ".config/directions/local.toml")},
-		{Path{Root: filepath.Join(base, "absolute")}, filepath.Join(base, "absolute")},
-	} {
-		got, err := ResolvePath(tc.path, anchors)
-		if err != nil || got != tc.want {
-			t.Fatalf("%#v: %q, %v; want %q", tc.path, got, err, tc.want)
+func TestLocalPaths(t *testing.T) {
+	// Validation is lexical: paths need not exist and no files are read.
+	for _, value := range []string{"docs/context.md", ".directions/policies/*.toml", "./docs/context.md", "a/../docs/context.md", "a space.md", "does-not-exist"} {
+		if err := validateLocalPath(value); err != nil {
+			t.Fatalf("%q: %v", value, err)
 		}
 	}
-	for _, path := range []Path{
-		{}, {Rel: "x", Repo: "y"}, {Rel: "../outside"}, {Rel: "a/../../outside"},
-		{Home: "/absolute"}, {Root: "relative"}, {Repo: "~/x"}, {Rel: "x\x00"},
-		{Rel: "C:/x"}, {Rel: `a\b`}, {Rel: " "},
-	} {
-		if _, err := ResolvePath(path, anchors); err == nil {
-			t.Fatalf("accepted %#v", path)
+	for _, value := range []string{"", " ", "../outside", "a/../../outside", "/etc/passwd", "~/x", "~user/x", "x\x00", "C:/x", `a\b`, "file:///x", "https://example.org/policy.toml", "http://example.org/policy.toml"} {
+		if err := validateLocalPath(value); err == nil {
+			t.Fatalf("accepted %q", value)
 		}
 	}
-	if _, err := ResolvePath(Path{Rel: "x"}, Anchors{}); err == nil {
-		t.Fatal("missing anchor accepted")
-	}
-	// Resolution must not require the target to exist or read it.
-	if _, err := ResolvePath(Path{Home: "does-not-exist"}, anchors); err != nil {
-		t.Fatal(err)
+	// Reject the old object syntax rather than silently interpreting its anchor.
+	for _, anchor := range []string{"rel", "repo", "home", "root"} {
+		for _, field := range []string{"[profiles.default]\nprompt", "[[overrides]]\npath"} {
+			if _, err := Parse([]byte(minimal + field + "={" + anchor + "=\"x\"}")); err == nil {
+				t.Fatalf("accepted legacy %s object in %s", anchor, field)
+			}
+		}
 	}
 }

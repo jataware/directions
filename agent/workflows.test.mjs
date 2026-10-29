@@ -30,6 +30,7 @@ test("action and workflow examples parse; executable action dependencies are pin
   assert.equal(action.inputs["github-review-events"].default, "COMMENT");
   assert.equal(action.inputs.model.default, "openai/gpt-6.1-sol");
   assert.equal(action.inputs.model.required, false);
+  assert.equal(action.inputs["allowed-urls"].required, false);
   const paths = ["agent/action.yml",
     ...readdirSync(resolve(root, "examples/github")).filter((name) => name.endsWith(".yml")).map((name) => "examples/github/" + name)];
   for (const path of paths) {

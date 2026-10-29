@@ -15,7 +15,7 @@ const maxDocumentBytes = 1 << 20
 
 func run(args []string, out, errOut io.Writer) int {
 	if len(args) < 2 || (args[0] != "validate" && args[0] != "context") || (args[0] == "validate" && len(args) != 2) {
-		fmt.Fprintln(errOut, "usage: directions validate FILE | directions context DIRECTORY [--profile NAME] [--diff-file JSON] [--agents] [--exact-root]")
+		fmt.Fprintln(errOut, "usage: directions validate FILE | directions context DIRECTORY [--profile NAME] [--diff-file JSON] [--agents] [--exact-root] [--allow-url URL ...]")
 		return 2
 	}
 	if args[0] == "context" {
@@ -25,10 +25,15 @@ func run(args []string, out, errOut io.Writer) int {
 		diffFile := flags.String("diff-file", "", "trusted host JSON array of changed paths")
 		agents := flags.Bool("agents", false, "include root context file")
 		exact := flags.Bool("exact-root", false, "do not discover parent roots")
+		var allowedURLs []string
+		flags.Func("allow-url", "authorize one exact HTTPS reference (repeatable)", func(value string) error {
+			allowedURLs = append(allowedURLs, value)
+			return nil
+		})
 		if err := flags.Parse(args[2:]); err != nil || flags.NArg() != 0 {
 			return 2
 		}
-		options := directions.ContextOptions{Profile: *profile, IncludeAgents: *agents, ExactRoot: *exact}
+		options := directions.ContextOptions{Profile: *profile, IncludeAgents: *agents, ExactRoot: *exact, AllowedURLs: allowedURLs}
 		if *diffFile != "" {
 			file, err := os.Open(*diffFile)
 			if err != nil {

@@ -10,6 +10,11 @@ scoped plugin tools. Enabling another extension can change that capability
 surface. Use least-privileged workflow tokens and do not run untrusted PR code
 in a credential-bearing job.
 
+HTTPS guidance requires exact host-owned URL approvals, verified TLS, bounded
+reads, and no redirects or ambient authentication. Approving a URL grants network
+access to that destination; do not derive approvals from untrusted repository or
+PR content. Prefer SHA-256 pins. Remote fragments cannot introduce further reads.
+
 Do not disclose credentials or private source in public issues. Use GitHub's
 private vulnerability reporting when available; otherwise contact the repository
 maintainers privately.

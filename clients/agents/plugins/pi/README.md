@@ -41,8 +41,10 @@ extension/package before granting project trust.
 - No Directions entry: do nothing. An invalid entry/config is reported, not
   silently skipped in favor of a parent.
 - Read `base.toml`, compose repository-local override files, select
-  `profiles.default`, and read its prompt. Prompts may use the string shorthand
-  or typed `rel`/`repo` paths.
+  `profiles.default`, and read its prompt. Prompt and override paths are plain
+  project-root-relative strings or HTTPS URLs. Approve remote references with
+  `--directions-allow-urls "https://example.org/guidance.md"`; multiple exact
+  references are whitespace-separated. No URL is implicitly authorized.
 - Add a distinct `directions` system-prompt section. Pi continues to load
   `AGENTS.md`, ancestor instructions, and overrides normally; the extension
   does not load them a second time, replace the whole system prompt, or
@@ -74,10 +76,13 @@ execute instructions, or enforce policy severity. Profile model/thinking
 preferences produce a short context-only notice; Pi keeps its native runtime
 configuration, including providers, endpoints, and credentials.
 
-All automatically read files must be regular files confined to the selected
-repository root using Go's traversal-resistant `os.Root`. Home/root prompt
-and override paths are rejected. Override globs do not traverse symlink
-directories. Provider/credential configuration is not part of Directions and is
+Local files must be regular files confined to the selected project root using
+Go's traversal-resistant `os.Root`. Absolute filesystem paths and old path objects
+are rejected. HTTPS sources require exact host approval (including digest
+fragments), verified TLS, bounded reads, and no redirects or ambient credentials.
+Use `#sha256=<64 hex digits>` to pin bytes; unpinned sources warn and may change.
+Remote fragments cannot introduce prompts or further overrides. Override globs
+do not traverse symlink directories. Provider/credential configuration is not part of Directions and is
 rejected by the parser. This is not a sandbox; repository guidance remains
 untrusted input to the model.
 

@@ -33,7 +33,7 @@ const contextConfig = `meta.version = "v1.0.0"
 [repo]
 vcs = "git"
 [profiles.default]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 [[profiles.default.whitelist]]
 group = "rules"
 [policies.rules.always]
@@ -135,14 +135,15 @@ func TestUnbornAndUnavailableDiff(t *testing.T) {
 	}
 }
 
-func TestCompositionAndProvenance(t *testing.T) {
+func TestCompositionUsesProjectRoot(t *testing.T) {
 	root := repoFixture(t)
-	put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath.rel=\"policies/*.toml\"\n")
+	put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath=\".directions/policies/*.toml\"\n")
 	put(t, root, ".directions/policies/01.toml", "[profiles.default]\nprompt=\"nested.md\"\n[policies.rules.always]\ninstructions=\"OVERRIDE_ONE\"\n")
-	put(t, root, ".directions/policies/nested.md", "NESTED_CONTEXT")
+	put(t, root, "nested.md", "NESTED_CONTEXT")
+	put(t, root, ".directions/policies/nested.md", "WRONG_DOCUMENT_ANCHOR")
 	put(t, root, ".directions/policies/02.toml", "[policies.rules.always]\ninstructions=\"OVERRIDE_TWO\"\n")
-	result := load(t, root)
-	if !strings.Contains(result.Content, "OVERRIDE_TWO") || strings.Contains(result.Content, "OVERRIDE_ONE") || !strings.Contains(result.Content, "NESTED_CONTEXT") {
+	result := load(t, filepath.Join(root, "src"))
+	if !strings.Contains(result.Content, "OVERRIDE_TWO") || strings.Contains(result.Content, "OVERRIDE_ONE") || !strings.Contains(result.Content, "NESTED_CONTEXT") || strings.Contains(result.Content, "WRONG_DOCUMENT_ANCHOR") {
 		t.Fatal(result)
 	}
 	// Arrays replace rather than append, and duplicate selections are deduplicated.
@@ -152,16 +153,28 @@ func TestCompositionAndProvenance(t *testing.T) {
 	}
 }
 
+func TestMovingFragmentPreservesPaths(t *testing.T) {
+	root := repoFixture(t)
+	put(t, root, "docs/shared.md", "SHARED_CONTEXT")
+	for _, name := range []string{".directions/policies/shared.toml", "config/deeper/shared.toml"} {
+		put(t, root, name, "[profiles.default]\nprompt=\"docs/shared.md\"\n")
+		put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath=\""+name+"\"\n")
+		if !strings.Contains(load(t, root).Content, "SHARED_CONTEXT") {
+			t.Fatal("moving a fragment changed its prompt anchor")
+		}
+	}
+}
+
 func TestContextErrors(t *testing.T) {
 	for name, config := range map[string]string{
 		"missing profile":          minimal,
 		"unknown group":            strings.Replace(contextConfig, `group = "rules"`, `group = "missing"`, 1),
 		"unknown policy":           strings.Replace(contextConfig, `group = "rules"`, "group = \"rules\"\npolicy=\"missing\"", 1),
-		"home prompt":              strings.Replace(contextConfig, `prompt = "contexts/general.md"`, `prompt.home = "secret"`, 1),
-		"root prompt":              strings.Replace(contextConfig, `prompt = "contexts/general.md"`, `prompt.root = "/etc/passwd"`, 1),
+		"home prompt":              strings.Replace(contextConfig, `prompt = ".directions/contexts/general.md"`, `prompt.home = "secret"`, 1),
+		"root prompt":              strings.Replace(contextConfig, `prompt = ".directions/contexts/general.md"`, `prompt.root = "/etc/passwd"`, 1),
 		"invalid glob":             strings.Replace(contextConfig, "src/**/*.go", "src/[.go", 1),
 		"embedded doublestar":      strings.Replace(contextConfig, "src/**/*.go", "src/**.go", 1),
-		"literal missing override": contextConfig + "\n[[overrides]]\npath.rel=\"missing.toml\"",
+		"literal missing override": contextConfig + "\n[[overrides]]\npath=\".directions/missing.toml\"",
 		"home override":            contextConfig + "\n[[overrides]]\npath.home=\"*.toml\"",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -173,15 +186,19 @@ func TestContextErrors(t *testing.T) {
 		})
 	}
 	for name, fragment := range map[string]string{
-		"nested":               "[[overrides]]\npath.rel=\"other.toml\"",
+		"nested":               "[[overrides]]\npath=\".directions/other.toml\"",
 		"version":              "meta.version=\"v2.0.0\"",
 		"vcs":                  "[repo]\nvcs=\"none\"",
 		"unknown key":          "[polcies.rules.test]\ntitle=\"bad\"",
+		"typed prompt":         "[profiles.default]\nprompt={repo=\"nested.md\"}",
+		"empty prompt":         "[profiles.default]\nprompt=\"\"",
+		"escaping prompt":      "[profiles.default]\nprompt=\"../outside.md\"",
+		"unapproved prompt":    "[profiles.default]\nprompt=\"https://example.invalid/context.md\"",
 		"invalid final policy": "[policies.rules.new]\ntitle=\"missing instructions\"",
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := repoFixture(t)
-			put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath.rel=\"fragment.toml\"")
+			put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath=\".directions/fragment.toml\"")
 			put(t, root, ".directions/fragment.toml", fragment)
 			if _, err := InitialContext(context.Background(), root); err == nil {
 				t.Fatal("expected fragment error")
@@ -214,7 +231,7 @@ func TestConfinementAndLimits(t *testing.T) {
 		t.Fatal("oversized context accepted")
 	}
 	put(t, root, ".directions/contexts/general.md", "GENERAL")
-	put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath.rel=\"policies/*.toml\"")
+	put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath=\".directions/policies/*.toml\"")
 	// An unmatched glob is valid, including a nonexistent static directory prefix.
 	load(t, root)
 	for i := 0; i < maxOverrideFiles+1; i++ {
@@ -222,6 +239,25 @@ func TestConfinementAndLimits(t *testing.T) {
 	}
 	if _, err := InitialContext(context.Background(), root); err == nil {
 		t.Fatal("override file cap ignored")
+	}
+}
+
+func TestOverrideSymlinkConfinement(t *testing.T) {
+	root := repoFixture(t)
+	outside := t.TempDir()
+	put(t, outside, "policy.toml", "[policies.rules.always]\ninstructions=\"OUTSIDE_RULE\"\n")
+	link := ".directions/policies/outside.toml"
+	if err := os.MkdirAll(filepath.Join(root, ".directions/policies"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "policy.toml"), filepath.Join(root, link)); err != nil {
+		t.Fatal(err)
+	}
+	for _, pattern := range []string{link, ".directions/policies/*.toml"} {
+		put(t, root, ".directions/base.toml", contextConfig+"\n[[overrides]]\npath=\""+pattern+"\"\n")
+		if _, err := InitialContext(context.Background(), root); err == nil {
+			t.Fatal("read an override outside the project root")
+		}
 	}
 }
 

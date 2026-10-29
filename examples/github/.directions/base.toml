@@ -3,16 +3,16 @@ meta.version = "v1.0.0"
 vcs = "git"
 
 [profiles.default]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 
 [profiles.review]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 
 [profiles.plan]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 
 [profiles.describe]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 [[profiles.describe.whitelist]]
 group = "engineering"
 policy = "evidence"
