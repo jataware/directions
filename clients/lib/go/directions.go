@@ -1,6 +1,6 @@
-// Package directions parses draft Directions documents and assembles bounded,
-// repository-local guidance. Parsing is pure; InitialContext reads configuration,
-// prompt files, and local Git filenames, but never credentials or instructions as code.
+// Package directions parses draft Directions documents and assembles bounded
+// guidance. Parsing is pure; BuildContext reads local files and host-approved
+// HTTPS sources, but never credentials or instructions as code.
 package directions
 
 import (
@@ -30,7 +30,7 @@ type PolicyRef struct {
 }
 
 type Profile struct {
-	Prompt   string `toml:"prompt"` // relative to the selected project root
+	Prompt   string `toml:"prompt"` // project-root-relative path or HTTPS URL
 	Model    string `toml:"model"`
 	Thinking string `toml:"thinking"`
 	// nil means absent; a pointer to an empty slice is an explicit empty list.
@@ -48,7 +48,7 @@ type Policy struct {
 }
 
 type Override struct {
-	Path string `toml:"path"` // project-root-relative file or glob
+	Path string `toml:"path"` // project-root-relative file/glob or HTTPS URL
 }
 
 type Document struct {
@@ -106,7 +106,7 @@ func parse(data []byte, fragment bool) (*Document, error) {
 			return nil, fmt.Errorf("profiles.%s model must be a qualified provider/model reference", name)
 		}
 		if profile.Prompt != "" {
-			if err := validateLocalPath(profile.Prompt); err != nil {
+			if err := validateReference(profile.Prompt); err != nil {
 				return nil, fmt.Errorf("profiles.%s.prompt: %w", name, err)
 			}
 		}
@@ -147,7 +147,7 @@ func parse(data []byte, fragment bool) (*Document, error) {
 		}
 	}
 	for i, override := range doc.Overrides {
-		if err := validateLocalPath(override.Path); err != nil {
+		if err := validateReference(override.Path); err != nil {
 			return nil, fmt.Errorf("overrides[%d]: %w", i, err)
 		}
 	}

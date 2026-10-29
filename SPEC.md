@@ -42,11 +42,12 @@ ignored typos. Empty collections and absent optional fields are allowed.
 The base document MUST declare `meta.version` and `repo.vcs`.
 `repo.vcs` is `"git"` or `"none"`; neither value runs a command.
 
-Prompt and override paths MUST be nonempty strings relative to the selected
-project root (the directory containing `.directions/`), even in fragments.
-Use forward slashes; absolute paths, escaping the root via `..`, backslashes,
-tilde prefixes, NUL, and URLs (including HTTPS) are unsupported. No variable or
-tilde expansion occurs. Parsing paths does not read files or authorize access.
+Prompt and override references MUST be nonempty strings: either local paths or
+absolute `https://` URLs. Local paths are relative to the selected project root
+(the directory containing `.directions/`), even in fragments. Use forward slashes;
+absolute filesystem paths, escaping the root via `..`, backslashes, tilde prefixes,
+NUL, and other URI schemes are unsupported. No variable or tilde expansion occurs.
+Parsing references does not read files, fetch URLs, or authorize access.
 Profile, group, and policy names use lower-case ASCII letters, digits,
 underscores, and hyphens.
 
@@ -54,8 +55,8 @@ underscores, and hyphens.
 
 `[profiles.<name>]` describes reusable task guidance:
 
-- `prompt`: optional project-root-relative path string, such as
-  `.directions/contexts/general.md`.
+- `prompt`: optional project-root-relative path or HTTPS URL, such as
+  `.directions/contexts/general.md` or `https://example.org/guidance.md`.
 - `model`: optional qualified `provider/model` preference, such as
   `openai/gpt-6.1-sol`. Provider connection settings are not part of Directions.
 - `thinking`: optional nonempty, adapter-specific hint. Consumers MUST report
@@ -144,12 +145,15 @@ credential access, or publication.
 
 ## 4. Overrides (proposed composition)
 
-`[[overrides]]` contains one required string `path` pointing to a TOML file
-or glob relative to the project root. For example:
+`[[overrides]]` contains one required string `path`: a project-root-relative TOML
+file/glob or an HTTPS URL to one TOML fragment. For example:
 
 ```toml
 [[overrides]]
 path = ".directions/policies/*.toml"
+
+[[overrides]]
+path = "https://example.org/directions/security.toml"
 ```
 
 A composition loader MUST:
@@ -164,11 +168,11 @@ A composition loader MUST:
 4. Recursively merge tables; later scalar values and arrays replace earlier
    values in full. No implicit array concatenation or deletion syntax exists.
 5. Reject attempts to override `meta.version` or `repo.vcs` with different
-   values. All paths remain project-root-relative when fragments move.
+   values. Local paths remain project-root-relative when fragments move.
 6. Reject nested override declarations in fragments for this version.
 7. Validate references against the composed result before running a task.
 
-Automatic loading MUST be confined to regular files under the selected
+Local file reads MUST be confined to regular files under the selected
 project root, including symlink target checks. Consumers MUST cap file counts,
 sizes, and match expansion. Lexical path validation alone does not establish
 confinement.
@@ -177,8 +181,31 @@ confinement.
 compose overrides. `InitialContext` and CLI `context` implement composition for
 context assembly and enforce 32 override files, 1 MiB per file, 4 MiB total
 config, and 4096 visited entries per glob. Glob traversal does not follow symlink
-directories. The old path objects are rejected; neither parser nor loader fetches
-remote resources.
+directories. The old path objects are rejected.
+
+HTTPS loading requires host approval of each **exact reference**, including any
+fragment. CLI `context --allow-url URL` is repeatable; the Go API uses
+`ContextOptions.AllowedURLs`, Pi uses `--directions-allow-urls` (whitespace-separated),
+and the action uses the workflow-owned `allowed-urls` input. None is enabled by
+repository configuration. Unapproved sources fail without making a request.
+
+URLs MUST fit in 4096 bytes and MUST NOT contain credentials, query strings,
+literal whitespace, or glob patterns. Optional `#sha256=<64 hex digits>` verifies
+the downloaded bytes before use; the fragment is not transmitted. Other fragments are rejected. Unpinned
+sources emit a mutability warning; prefer a digest and/or an immutable URL.
+
+The loader uses verified TLS, rejects redirects and non-200 responses, and sends
+no cookies or authorization headers. Its default transport ignores environment
+proxies and caps response headers at 16 KiB. Remote reads share a five-second
+network budget per context build and the existing file/context/config limits.
+There is only a per-build memory cache, not a persistent cache or stale fallback.
+Host-approved destinations may include private services; URL approval is a trust
+and network-access decision, not an assertion that a destination is public.
+
+Remote TOML fragments MUST be self-contained: no `prompt` references or nested
+`overrides`, even when the referenced targets are separately approved. Remote
+prompt text is data, not a list of resources to fetch. No relative URL resolution
+or implicit follow-on local/network reads occur.
 
 ## 5. Model preferences, not provider management
 

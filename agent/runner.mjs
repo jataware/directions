@@ -37,6 +37,7 @@ export function inputs(env) {
     workspace: env.INPUT_WORKSPACE || env.GITHUB_WORKSPACE || process.cwd(),
     directionsBin: env.DIRECTIONS_BIN,
     extensions: (env.INPUT_EXTENSIONS || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+    allowedURLs: (env.INPUT_ALLOWED_URLS || "").split(/\s+/).filter(Boolean),
     timeoutMs: integer(env.INPUT_TIMEOUT_SECONDS, 600, 1800, "timeout-seconds") * 1000,
     maxTurns: integer(env.INPUT_MAX_TURNS, 16, 100, "max-turns"),
     github: {
@@ -166,6 +167,7 @@ export async function runAgent(config, outputDir, dependencies = {}) {
         github = await (dependencies.createGitHubIntegration || createGitHubIntegration)({ ...config.github, number, kind: targetKindFromEvent(event, config.github.eventName), capabilities: config.capabilities, signal: abort.signal });
       }
       const args = ["context", workspace, "--profile", config.profile, "--agents", "--exact-root"];
+      for (const url of config.allowedURLs || []) args.push("--allow-url", url);
       if (github) {
         const diffFile = join(scratch, "changed.json");
         await writeFile(diffFile, JSON.stringify(github.changedPaths), { mode: 0o600 });

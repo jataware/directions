@@ -27,6 +27,12 @@ export default function directions(pi: ExtensionAPI) {
     default: "directions",
   });
 
+  pi.registerFlag("directions-allow-urls", {
+    description: "Whitespace-separated exact HTTPS guidance references approved by the host",
+    type: "string",
+    default: "",
+  });
+
   let loaded: DirectionsContext | undefined;
   let lastWarning = "";
 
@@ -35,7 +41,10 @@ export default function directions(pi: ExtensionAPI) {
     loaded = undefined;
     try {
       const binary = pi.getFlag("directions-bin");
-      const result = await pi.exec(typeof binary === "string" ? binary : "directions", ["context", ctx.cwd], {
+      const approved = pi.getFlag("directions-allow-urls");
+      const args = ["context", ctx.cwd];
+      if (typeof approved === "string") for (const url of approved.split(/\s+/).filter(Boolean)) args.push("--allow-url", url);
+      const result = await pi.exec(typeof binary === "string" ? binary : "directions", args, {
         cwd: ctx.cwd,
         timeout: 10_000,
       });

@@ -54,8 +54,8 @@ func TestInvalidDocuments(t *testing.T) {
 		"empty override":        minimal + "[[overrides]]",
 		"empty override path":   minimal + "[[overrides]]\npath=\"\"",
 		"invalid override type": minimal + "[[overrides]]\npath=2",
-		"remote override":       minimal + "[[overrides]]\npath=\"https://example.invalid/policy.toml\"",
-		"remote prompt":         minimal + "[profiles.default]\nprompt=\"https://example.invalid/context.md\"",
+		"insecure override":     minimal + "[[overrides]]\npath=\"http://example.invalid/policy.toml\"",
+		"insecure prompt":       minimal + "[profiles.default]\nprompt=\"http://example.invalid/context.md\"",
 		"unknown override":      minimal + "[[overrides]]\npath.bad=\"x\"",
 	}
 	for name, data := range tests {

@@ -193,7 +193,7 @@ func TestContextErrors(t *testing.T) {
 		"typed prompt":         "[profiles.default]\nprompt={repo=\"nested.md\"}",
 		"empty prompt":         "[profiles.default]\nprompt=\"\"",
 		"escaping prompt":      "[profiles.default]\nprompt=\"../outside.md\"",
-		"remote prompt":        "[profiles.default]\nprompt=\"https://example.invalid/context.md\"",
+		"unapproved prompt":    "[profiles.default]\nprompt=\"https://example.invalid/context.md\"",
 		"invalid final policy": "[policies.rules.new]\ntitle=\"missing instructions\"",
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -42,9 +43,11 @@ type ContextFile struct {
 // ContextOptions is trusted host configuration, not repository authorization.
 type ContextOptions struct {
 	Profile       string
-	ChangedPaths  *[]string // nil: inspect local Git; non-nil: authoritative host diff
-	IncludeAgents bool      // load only the selected root's native context file
-	ExactRoot     bool      // never discover ancestors; useful for CI checkouts
+	ChangedPaths  *[]string         // nil: inspect local Git; non-nil: authoritative host diff
+	IncludeAgents bool              // load only the selected root's native context file
+	ExactRoot     bool              // never discover ancestors; useful for CI checkouts
+	AllowedURLs   []string          // exact HTTPS references authorized by the host
+	HTTPTransport http.RoundTripper // optional trusted host TLS transport, not repository config
 }
 
 // DiscoverRoot finds the nearest .directions entry, stopping at the first Git
@@ -134,7 +137,12 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 			return nil, err
 		}
 	}
-	doc, err := contextDocument(reader)
+	sources, err := newSourceReader(ctx, reader, options)
+	if err != nil {
+		return nil, err
+	}
+	defer sources.close()
+	doc, err := contextDocument(sources)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +153,8 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	var content strings.Builder
 	fmt.Fprintf(&content, "# Repository Directions — profiles.%s\n\nRepository guidance only; this does not grant permissions or override host controls.\n", options.Profile)
 	if profile.Prompt != "" {
-		name := path.Clean(profile.Prompt)
-		data, err := readRegular(reader, name, maxContextBytes)
+		name := profile.Prompt
+		data, err := sources.read(name, maxContextBytes)
 		if err != nil {
 			return nil, fmt.Errorf("profiles.%s.prompt: %w", options.Profile, err)
 		}
@@ -230,6 +238,7 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	if content.Len() > maxContextBytes {
 		return nil, fmt.Errorf("Directions context exceeds 64 KiB limit")
 	}
+	result.Warnings = append(result.Warnings, sources.warnings...)
 	result.Content = content.String()
 	return result, nil
 }
@@ -261,10 +270,10 @@ func readRegular(root *os.Root, name string, limit int64) ([]byte, error) {
 	return data, err
 }
 
-// contextDocument composes bounded overrides; all paths share the project root.
-func contextDocument(reader *os.Root) (*Document, error) {
+// contextDocument composes local and host-approved remote overrides.
+func contextDocument(sources *sourceReader) (*Document, error) {
 	baseName := ".directions/base.toml"
-	data, err := readRegular(reader, baseName, maxFileBytes)
+	data, err := sources.read(baseName, maxFileBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -278,16 +287,19 @@ func contextDocument(reader *os.Root) (*Document, error) {
 	}
 	total, count := len(data), 0
 	for _, override := range base.Overrides {
-		matches, err := overrideMatches(reader, path.Clean(override.Path))
-		if err != nil {
-			return nil, err
+		matches := []string{override.Path}
+		if !strings.HasPrefix(override.Path, "https://") {
+			matches, err = overrideMatches(sources.root, path.Clean(override.Path))
+			if err != nil {
+				return nil, err
+			}
 		}
 		for _, name := range matches {
 			count++
 			if count > maxOverrideFiles {
 				return nil, fmt.Errorf("more than 32 override files")
 			}
-			data, err := readRegular(reader, name, maxFileBytes)
+			data, err := sources.read(name, maxFileBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -298,6 +310,13 @@ func contextDocument(reader *os.Root) (*Document, error) {
 			var shape Document
 			if err := decode(data, &shape); err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			if strings.HasPrefix(name, "https://") {
+				for _, profile := range shape.Profiles {
+					if profile.Prompt != "" {
+						return nil, fmt.Errorf("remote fragments cannot declare prompt references")
+					}
+				}
 			}
 			var fragment map[string]any
 			if err := toml.Unmarshal(data, &fragment); err != nil {

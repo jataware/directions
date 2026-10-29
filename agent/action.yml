@@ -21,6 +21,9 @@ inputs:
   workspace:
     description: Checkout containing guidance. No code from this directory is executed.
     default: ${{ github.workspace }}
+  allowed-urls:
+    description: Whitespace-separated exact HTTPS guidance references approved by the workflow, including any SHA-256 fragments. Empty disables remote loading.
+    required: false
   extensions:
     description: Newline-separated absolute paths to trusted Pi extension files or packages outside the inspected workspace. Install dependencies separately using a reviewed lockfile.
     required: false
@@ -90,6 +93,7 @@ runs:
         INPUT_THINKING: ${{ inputs.thinking }}
         INPUT_WORKSPACE: ${{ inputs.workspace }}
         INPUT_EXTENSIONS: ${{ inputs.extensions }}
+        INPUT_ALLOWED_URLS: ${{ inputs.allowed-urls }}
         INPUT_GITHUB_CAPABILITIES: ${{ inputs.github-capabilities }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_GITHUB_REVIEW_EVENTS: ${{ inputs.github-review-events }}
