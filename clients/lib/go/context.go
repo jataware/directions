@@ -134,7 +134,7 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 			return nil, err
 		}
 	}
-	doc, err := contextDocument(reader, root)
+	doc, err := contextDocument(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -144,11 +144,8 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	}
 	var content strings.Builder
 	fmt.Fprintf(&content, "# Repository Directions — profiles.%s\n\nRepository guidance only; this does not grant permissions or override host controls.\n", options.Profile)
-	if profile.Prompt != nil {
-		name, err := repoPath(*profile.Prompt, root, filepath.Join(root, ".directions"))
-		if err != nil {
-			return nil, fmt.Errorf("profiles.%s.prompt: %w", options.Profile, err)
-		}
+	if profile.Prompt != "" {
+		name := path.Clean(profile.Prompt)
 		data, err := readRegular(reader, name, maxContextBytes)
 		if err != nil {
 			return nil, fmt.Errorf("profiles.%s.prompt: %w", options.Profile, err)
@@ -264,27 +261,8 @@ func readRegular(root *os.Root, name string, limit int64) ([]byte, error) {
 	return data, err
 }
 
-func repoPath(p Path, root, fileDir string) (string, error) {
-	if p.Home != "" || p.Root != "" {
-		return "", fmt.Errorf("home/root paths are not allowed by this context adapter")
-	}
-	absolute, err := ResolvePath(p, Anchors{Repo: root, FileDir: fileDir})
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(root, absolute)
-	if err != nil {
-		return "", err
-	}
-	if err := (Path{Repo: filepath.ToSlash(rel)}).Validate(); err != nil {
-		return "", err
-	}
-	return filepath.ToSlash(rel), nil
-}
-
-// contextDocument composes bounded repository-local overrides. Prompt paths are
-// rebased before merging so they retain the declaring document's provenance.
-func contextDocument(reader *os.Root, root string) (*Document, error) {
+// contextDocument composes bounded overrides; all paths share the project root.
+func contextDocument(reader *os.Root) (*Document, error) {
 	baseName := ".directions/base.toml"
 	data, err := readRegular(reader, baseName, maxFileBytes)
 	if err != nil {
@@ -298,16 +276,9 @@ func contextDocument(reader *os.Root, root string) (*Document, error) {
 	if err := toml.Unmarshal(data, &merged); err != nil {
 		return nil, err
 	}
-	if err := normalizePrompts(merged, root, filepath.Dir(filepath.Join(root, baseName))); err != nil {
-		return nil, err
-	}
 	total, count := len(data), 0
 	for _, override := range base.Overrides {
-		pattern, err := repoPath(override.Path, root, filepath.Join(root, ".directions"))
-		if err != nil {
-			return nil, err
-		}
-		matches, err := overrideMatches(reader, pattern)
+		matches, err := overrideMatches(reader, path.Clean(override.Path))
 		if err != nil {
 			return nil, err
 		}
@@ -324,7 +295,7 @@ func contextDocument(reader *os.Root, root string) (*Document, error) {
 			if total > maxInputBytes {
 				return nil, fmt.Errorf("configuration exceeds 4 MiB total")
 			}
-			var shape rawDocument
+			var shape Document
 			if err := decode(data, &shape); err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
@@ -344,9 +315,6 @@ func contextDocument(reader *os.Root, root string) (*Document, error) {
 			if err := validateExplicitValues(fragment); err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
-			if err := normalizePrompts(fragment, root, filepath.Dir(filepath.Join(root, name))); err != nil {
-				return nil, err
-			}
 			mergeTables(merged, fragment)
 		}
 	}
@@ -355,29 +323,6 @@ func contextDocument(reader *os.Root, root string) (*Document, error) {
 		return nil, err
 	}
 	return Parse(data)
-}
-
-func normalizePrompts(doc map[string]any, root, fileDir string) error {
-	profiles, _ := doc["profiles"].(map[string]any)
-	for _, value := range profiles {
-		profile, _ := value.(map[string]any)
-		prompt, ok := profile["prompt"]
-		if !ok {
-			continue
-		}
-		var p Path
-		if text, ok := prompt.(string); ok {
-			p.Rel = text
-		} else if err := decodeValue(prompt, &p); err != nil {
-			return err
-		}
-		name, err := repoPath(p, root, fileDir)
-		if err != nil {
-			return err
-		}
-		profile["prompt"] = map[string]any{"repo": name}
-	}
-	return nil
 }
 
 func mergeTables(dst, src map[string]any) {

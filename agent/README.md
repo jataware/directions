@@ -37,7 +37,7 @@ See [action.yml](action.yml) for the complete input contract.
 - Runtime: `thinking` (default `off`), `timeout-seconds` (default 600,
   maximum 1800), `max-turns` (default 16, maximum 100). Pi clamps thinking
   to model capabilities. No fallback/replay occurs. Identifier conventions and
-  models.dev references are documented in [the spec](../SPEC.md#6-model-preferences-not-provider-management).
+  models.dev references are documented in [the spec](../SPEC.md#5-model-preferences-not-provider-management).
 - Integrations: `extensions` (approved absolute local paths),
   `github-capabilities` (empty by default), `github-token` (default GitHub
   workflow token), `github-review-events` (default `COMMENT`), and

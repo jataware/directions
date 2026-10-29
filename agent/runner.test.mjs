@@ -24,7 +24,7 @@ async function fixture() {
 [repo]
 vcs="none"
 [profiles.review]
-prompt="contexts/review.md"
+prompt=".directions/contexts/review.md"
 [[profiles.review.whitelist]]
 group="code"
 [policies.code.source]

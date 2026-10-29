@@ -120,7 +120,7 @@ func TestPolicySelectionComposition(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			put(t, root, ".directions/base.toml", selectionConfig(tc.baseSelection)+"\n[[overrides]]\npath.rel=\"fragment.toml\"\n")
+			put(t, root, ".directions/base.toml", selectionConfig(tc.baseSelection)+"\n[[overrides]]\npath=\".directions/fragment.toml\"\n")
 			put(t, root, ".directions/fragment.toml", tc.fragment)
 			paths := []string{}
 			result, err := BuildContext(context.Background(), root, ContextOptions{ExactRoot: true, ChangedPaths: &paths})

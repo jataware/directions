@@ -8,7 +8,7 @@ meta.version = "v1.0.0"
 vcs = "git" # or "none"
 
 [profiles.default]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 model = "openai/gpt-6.1-sol"
 thinking = "medium"
 
@@ -27,5 +27,4 @@ host configuration, and reference reusable contexts from profiles.
 """
 
 [[overrides]]
-path.rel = "policies/*.toml"
-# Equivalent here: path.repo = ".directions/policies/*.toml"
+path = ".directions/policies/*.toml"

@@ -42,12 +42,20 @@ ignored typos. Empty collections and absent optional fields are allowed.
 The base document MUST declare `meta.version` and `repo.vcs`.
 `repo.vcs` is `"git"` or `"none"`; neither value runs a command.
 
+Prompt and override paths MUST be nonempty strings relative to the selected
+project root (the directory containing `.directions/`), even in fragments.
+Use forward slashes; absolute paths, escaping the root via `..`, backslashes,
+tilde prefixes, NUL, and URLs (including HTTPS) are unsupported. No variable or
+tilde expansion occurs. Parsing paths does not read files or authorize access.
+Profile, group, and policy names use lower-case ASCII letters, digits,
+underscores, and hyphens.
+
 ## 2. Profiles
 
 `[profiles.<name>]` describes reusable task guidance:
 
-- `prompt`: optional nonempty path string relative to the declaring file,
-  or an explicit typed path (section 5).
+- `prompt`: optional project-root-relative path string, such as
+  `.directions/contexts/general.md`.
 - `model`: optional qualified `provider/model` preference, such as
   `openai/gpt-6.1-sol`. Provider connection settings are not part of Directions.
 - `thinking`: optional nonempty, adapter-specific hint. Consumers MUST report
@@ -65,7 +73,7 @@ and the Agent action select the explicitly requested profile (default `default`)
 
 ```toml
 [profiles.default]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 ```
 
 With neither selection list present, **every policy in every group** is eligible,
@@ -76,7 +84,7 @@ decide which policy instructions belong in the current context.
 
 ```toml
 [profiles.default]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 
 [[profiles.default.whitelist]]
 group = "meta"
@@ -91,7 +99,7 @@ A present whitelist switches the profile to whitelist mode. Explicit
 
 ```toml
 [profiles.default]
-prompt = "contexts/general.md"
+prompt = ".directions/contexts/general.md"
 
 [[profiles.default.blacklist]]
 group = "meta"
@@ -136,15 +144,15 @@ credential access, or publication.
 
 ## 4. Overrides (proposed composition)
 
-`[[overrides]]` contains one required typed `path` pointing to a TOML file
-or glob. For example:
+`[[overrides]]` contains one required string `path` pointing to a TOML file
+or glob relative to the project root. For example:
 
 ```toml
 [[overrides]]
-path.rel = "policies/*.toml"
+path = ".directions/policies/*.toml"
 ```
 
-A future composition loader MUST:
+A composition loader MUST:
 
 1. Read the base document, then expand override entries in declaration order.
 2. Sort matches within an entry lexicographically by normalized path. Zero
@@ -156,50 +164,23 @@ A future composition loader MUST:
 4. Recursively merge tables; later scalar values and arrays replace earlier
    values in full. No implicit array concatenation or deletion syntax exists.
 5. Reject attempts to override `meta.version` or `repo.vcs` with different
-   values. Resolve paths relative to the document that supplied each value.
+   values. All paths remain project-root-relative when fragments move.
 6. Reject nested override declarations in fragments for this version.
 7. Validate references against the composed result before running a task.
 
 Automatic loading MUST be confined to regular files under the selected
-repository root, including symlink target checks. Home/root override paths
-require explicit host approval and are not enabled by repository content.
-Consumers MUST cap file counts, sizes, and match expansion. These are loader
-requirements; lexical path resolution alone does not establish confinement.
+project root, including symlink target checks. Consumers MUST cap file counts,
+sizes, and match expansion. Lexical path validation alone does not establish
+confinement.
 
 `Parse`/`ParseFragment` and CLI `validate` inspect single documents; they do not
 compose overrides. `InitialContext` and CLI `context` implement composition for
-context assembly, normalize prompt paths relative to their declaring document,
-and enforce 32 override files, 1 MiB per file, 4 MiB total config, and 4096 visited
-entries per glob. Glob traversal does not follow symlink directories. This adapter
-rejects home/root override and prompt paths rather than requesting access.
+context assembly and enforce 32 override files, 1 MiB per file, 4 MiB total
+config, and 4096 visited entries per glob. Glob traversal does not follow symlink
+directories. The old path objects are rejected; neither parser nor loader fetches
+remote resources.
 
-## 5. Typed paths
-
-A path object MUST contain exactly one nonempty string key:
-
-| Key | Anchor | Example |
-| --- | --- | --- |
-| `rel` | Directory of the declaring TOML document | `path.rel = "policies/*.toml"` |
-| `repo` | Explicit repository root | `path.repo = ".directions/policies/*.toml"` |
-| `home` | Explicit host-selected home directory | `path.home = ".config/directions/local.toml"` |
-| `root` | Absolute filesystem path | `path.root = "/etc/directions/local.toml"` |
-
-Keep these explicit keys instead of special prefixes such as `~/` or
-`repo://`: the meaning is visible, TOML can validate the shape, and no
-interpolation language is needed. `root` means an absolute path, not a path
-implicitly rebased on `/`.
-
-Relative paths MUST NOT be absolute or escape their anchor via `..`.
-No environment-variable expansion, tilde expansion, or URI parsing occurs.
-Path-bearing fields use typed objects unless an explicit shorthand is specified
-(`profiles.*.prompt` accepts a string as shorthand for `{ rel = "..." }`).
-Names use lower-case ASCII letters, digits, underscores, and hyphens.
-
-Resolving a path MUST NOT read it, follow symlinks, or authorize access.
-Consumers opening a resolved path MUST separately enforce trust, confinement,
-symlink handling, and allowed file types.
-
-## 6. Model preferences, not provider management
+## 5. Model preferences, not provider management
 
 Profiles MAY include optional runtime preferences:
 
@@ -256,7 +237,7 @@ context-only adapters leave the host's model/thinking unchanged and emit a short
 notice without injecting the requested model name into model context. The Agent
 action uses explicit workflow model/credential inputs instead.
 
-## 7. Trust and integration boundaries
+## 6. Trust and integration boundaries
 
 Contexts are reusable prompt/guidance content, not executable configuration.
 Repository guidance may be untrusted, including changes from pull requests.

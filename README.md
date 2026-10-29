@@ -56,6 +56,9 @@ an empty policies directory, and refuses to replace an existing
 `.directions/` entry (including symlinks). It does not install software,
 read credentials, execute repository code, or modify GitHub workflows.
 Review the example model preference and configure your client separately.
+Prompt and override paths are plain strings relative to the selected project
+root, such as `.directions/contexts/general.md`—never relative to the TOML file.
+Absolute paths, URLs, and the old path objects are unsupported.
 
 ## Go CLI
 

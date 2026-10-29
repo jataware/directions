@@ -41,8 +41,8 @@ extension/package before granting project trust.
 - No Directions entry: do nothing. An invalid entry/config is reported, not
   silently skipped in favor of a parent.
 - Read `base.toml`, compose repository-local override files, select
-  `profiles.default`, and read its prompt. Prompts may use the string shorthand
-  or typed `rel`/`repo` paths.
+  `profiles.default`, and read its prompt. Prompt and override paths are plain
+  strings relative to the selected project root, not the declaring TOML file.
 - Add a distinct `directions` system-prompt section. Pi continues to load
   `AGENTS.md`, ancestor instructions, and overrides normally; the extension
   does not load them a second time, replace the whole system prompt, or
@@ -75,8 +75,8 @@ preferences produce a short context-only notice; Pi keeps its native runtime
 configuration, including providers, endpoints, and credentials.
 
 All automatically read files must be regular files confined to the selected
-repository root using Go's traversal-resistant `os.Root`. Home/root prompt
-and override paths are rejected. Override globs do not traverse symlink
+project root using Go's traversal-resistant `os.Root`. Absolute paths, URLs,
+and the old path objects are rejected. Override globs do not traverse symlink
 directories. Provider/credential configuration is not part of Directions and is
 rejected by the parser. This is not a sandbox; repository guidance remains
 untrusted input to the model.
