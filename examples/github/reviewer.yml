@@ -30,6 +30,7 @@ jobs:
           model: openai/gpt-6.1-sol
           api-key: ${{ secrets.OPENAI_API_KEY }}
           profile: review
+          operation: review
           github-capabilities: read,review-propose,review-publish
           # COMMENT is the default enforced outcome. Opt into other outcomes deliberately.
           github-review-events: COMMENT

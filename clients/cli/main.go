@@ -14,14 +14,20 @@ import (
 const maxDocumentBytes = 1 << 20
 
 func run(args []string, out, errOut io.Writer) int {
-	if len(args) < 2 || (args[0] != "validate" && args[0] != "context") || (args[0] == "validate" && len(args) != 2) {
-		fmt.Fprintln(errOut, "usage: directions validate FILE | directions context DIRECTORY [--profile NAME] [--diff-file JSON] [--agents] [--exact-root] [--allow-url URL ...]")
+	if len(args) < 2 || (args[0] != "validate" && args[0] != "context" && args[0] != "explain") || (args[0] == "validate" && len(args) != 2) {
+		fmt.Fprintln(errOut, "usage: directions validate FILE | directions context|explain DIRECTORY [--profile NAME] [--operation NAME] [--path PATH ...] [--diff-file JSON] [--agents] [--exact-root] [--allow-url URL ...]")
 		return 2
 	}
-	if args[0] == "context" {
+	if args[0] == "context" || args[0] == "explain" {
 		flags := flag.NewFlagSet("context", flag.ContinueOnError)
 		flags.SetOutput(errOut)
 		profile := flags.String("profile", "default", "selected profile")
+		operation := flags.String("operation", "general", "host operation; review includes scoped REVIEWER.md")
+		var additionalPaths []string
+		flags.Func("path", "add an explicit repository-relative scope path (repeatable)", func(value string) error {
+			additionalPaths = append(additionalPaths, value)
+			return nil
+		})
 		diffFile := flags.String("diff-file", "", "trusted host JSON array of changed paths")
 		agents := flags.Bool("agents", false, "include root context file")
 		exact := flags.Bool("exact-root", false, "do not discover parent roots")
@@ -33,7 +39,7 @@ func run(args []string, out, errOut io.Writer) int {
 		if err := flags.Parse(args[2:]); err != nil || flags.NArg() != 0 {
 			return 2
 		}
-		options := directions.ContextOptions{Profile: *profile, IncludeAgents: *agents, ExactRoot: *exact, AllowedURLs: allowedURLs}
+		options := directions.ContextOptions{Profile: *profile, Operation: *operation, AdditionalPaths: additionalPaths, IncludeAgents: *agents, ExactRoot: *exact, AllowedURLs: allowedURLs}
 		if *diffFile != "" {
 			file, err := os.Open(*diffFile)
 			if err != nil {
@@ -54,7 +60,18 @@ func run(args []string, out, errOut io.Writer) int {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}
-		if err := json.NewEncoder(out).Encode(result); err != nil {
+		var output any = result
+		if args[0] == "explain" {
+			// Diagnostics only: never repeat instruction bodies or native context.
+			output = struct {
+				Root      string                `json:"root"`
+				Operation string                `json:"operation"`
+				DiffKnown bool                  `json:"diff_known"`
+				Decisions []directions.Decision `json:"decisions"`
+				Warnings  []string              `json:"warnings"`
+			}{result.Root, result.Operation, result.DiffKnown, result.Decisions, result.Warnings}
+		}
+		if err := json.NewEncoder(out).Encode(output); err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}

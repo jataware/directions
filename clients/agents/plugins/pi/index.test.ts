@@ -15,7 +15,7 @@ function harness() {
   const calls: unknown[][] = [];
   let response = { code: 0, stdout: JSON.stringify({ root: "/repo", content: "DEFAULT_CONTEXT", warnings: [] }), stderr: "" };
   const api = {
-    registerFlag(name: string, value: unknown) { assert.ok(["directions-bin", "directions-allow-urls"].includes(name)); },
+    registerFlag(name: string, value: unknown) { assert.ok(["directions-bin", "directions-allow-urls", "directions-profile", "directions-operation"].includes(name)); },
     getFlag(name: string) { return name === "directions-bin" ? "/trusted/directions" : ""; },
     on(name: string, handler: Handler) { handlers.set(name, handler); },
     async exec(...args: unknown[]) { calls.push(args); return response; },
@@ -48,9 +48,16 @@ test("startup and per-prompt refresh preserve AGENTS and avoid accumulating cont
 
 test("only host-provided URL approvals are forwarded", async () => {
   const h = harness();
-  h.api.getFlag = (name) => name === "directions-bin" ? "/trusted/directions" : "https://example.invalid/a\nhttps://example.invalid/b";
+  h.api.getFlag = (name) => name === "directions-bin" ? "/trusted/directions" : name === "directions-allow-urls" ? "https://example.invalid/a\nhttps://example.invalid/b" : "";
   await h.handlers.get("session_start")!({}, h.ctx);
   assert.deepEqual(h.calls[0][1], ["context", "/repo", "--allow-url", "https://example.invalid/a", "--allow-url", "https://example.invalid/b"]);
+});
+
+test("host operation and profile are forwarded without running an agent", async () => {
+  const h = harness();
+  h.api.getFlag = (name) => ({ "directions-bin": "/trusted/directions", "directions-profile": "review", "directions-operation": "review" }[name] || "");
+  await h.handlers.get("session_start")!({}, h.ctx);
+  assert.deepEqual(h.calls[0][1], ["context", "/repo", "--profile", "review", "--operation", "review"]);
 });
 
 test("invalid config/binary responses clear stale content and remain visible without a UI", async () => {
@@ -96,7 +103,8 @@ test("extension integrates with the real Go CLI, bootstrap config, and local Git
     execFileSync(join(root, "bootstrap.sh"), [repo]);
     // An untracked reusable prompt matches the starter's meta policy.
     const h = harness();
-    h.api.getFlag = (name) => name === "directions-bin" ? binary : "";
+    h.api.getFlag = (name) => name === "directions-bin" ? binary : name === "directions-operation" ? "review" : "";
+    writeFileSync(join(repo, "REVIEWER.md"), "ROOT_REVIEW_GUIDANCE");
     h.api.exec = async (command: unknown, args: unknown, options: unknown) => ({
       code: 0, stdout: execFileSync(command as string, args as string[], options as object).toString(), stderr: "",
     });
@@ -107,6 +115,7 @@ test("extension integrates with the real Go CLI, bootstrap config, and local Git
     await h.handlers.get("session_start")!({}, { ...h.ctx, cwd: repo });
     await h.handlers.get("before_agent_start")!(event, { ...h.ctx, cwd: repo });
     assert.match(event.systemPromptOptions.sections.directions, /General repository guidance/);
+    assert.match(event.systemPromptOptions.sections.directions, /ROOT_REVIEW_GUIDANCE/);
     assert.match(event.systemPromptOptions.sections.directions, /only-prompts-in-contexts-dir/);
     assert.equal(event.systemPromptOptions.contextFiles[0].content, "NATIVE_AGENT");
     // Stage everything and commit: after the worktree becomes clean, remove the policy.

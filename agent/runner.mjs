@@ -30,9 +30,11 @@ export function inputs(env) {
   if (!["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(thinking)) throw new Error("Invalid thinking level");
   const profile = env.INPUT_PROFILE || "default";
   if (!/^[a-z0-9_-]+$/.test(profile)) throw new Error("Invalid profile name");
+  const operation = env.INPUT_OPERATION || "general";
+  if (!/^[a-z0-9_-]+$/.test(operation)) throw new Error("Invalid operation name");
   const capabilities = [...parseCapabilities(env.INPUT_GITHUB_CAPABILITIES)].join(",");
   return {
-    task, model, provider: model.slice(0, slash), modelID: model.slice(slash + 1), thinking, profile,
+    task, model, provider: model.slice(0, slash), modelID: model.slice(slash + 1), thinking, profile, operation,
     apiKey: env.INPUT_API_KEY || "", capabilities,
     workspace: env.INPUT_WORKSPACE || env.GITHUB_WORKSPACE || process.cwd(),
     directionsBin: env.DIRECTIONS_BIN,
@@ -166,7 +168,7 @@ export async function runAgent(config, outputDir, dependencies = {}) {
         const number = targetFromEvent(event, config.github.eventName, config.github.number);
         github = await (dependencies.createGitHubIntegration || createGitHubIntegration)({ ...config.github, number, kind: targetKindFromEvent(event, config.github.eventName), capabilities: config.capabilities, signal: abort.signal });
       }
-      const args = ["context", workspace, "--profile", config.profile, "--agents", "--exact-root"];
+      const args = ["context", workspace, "--profile", config.profile, "--operation", config.operation || "general", "--agents", "--exact-root"];
       for (const url of config.allowedURLs || []) args.push("--allow-url", url);
       if (github) {
         const diffFile = join(scratch, "changed.json");
@@ -178,6 +180,7 @@ export async function runAgent(config, outputDir, dependencies = {}) {
       const context = JSON.parse(response.stdout);
       if (typeof context.content !== "string" || !Array.isArray(context.warnings)) throw new Error("Invalid Directions context response");
       metadata.warnings = context.warnings.map((warning) => clean(warning));
+      metadata.selection = { operation: context.operation, diffKnown: context.diff_known, decisions: scrub(context.decisions || [], secrets) };
       const factories = [(pi) => {
         pi.on("before_agent_start", (event) => {
           if (context.content) event.systemPromptOptions.sections.directions = clean(context.content);

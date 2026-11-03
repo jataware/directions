@@ -29,10 +29,13 @@ const (
 // ContextResult contains only model-facing guidance and diagnostics, never
 // runtime configuration or credentials.
 type ContextResult struct {
-	Root     string        `json:"root"`
-	Content  string        `json:"content"`
-	Warnings []string      `json:"warnings"`
-	Agents   []ContextFile `json:"agents,omitempty"`
+	Root      string        `json:"root"`
+	Content   string        `json:"content"`
+	Warnings  []string      `json:"warnings"`
+	Agents    []ContextFile `json:"agents,omitempty"`
+	Operation string        `json:"operation"`
+	DiffKnown bool          `json:"diff_known"`
+	Decisions []Decision    `json:"decisions"`
 }
 
 type ContextFile struct {
@@ -42,12 +45,14 @@ type ContextFile struct {
 
 // ContextOptions is trusted host configuration, not repository authorization.
 type ContextOptions struct {
-	Profile       string
-	ChangedPaths  *[]string         // nil: inspect local Git; non-nil: authoritative host diff
-	IncludeAgents bool              // load only the selected root's native context file
-	ExactRoot     bool              // never discover ancestors; useful for CI checkouts
-	AllowedURLs   []string          // exact HTTPS references authorized by the host
-	HTTPTransport http.RoundTripper // optional trusted host TLS transport, not repository config
+	Profile         string
+	Operation       string            // default: general; review enables directory-local REVIEWER.md
+	AdditionalPaths []string          // explicit host scope expansion, not semantic dependency discovery
+	ChangedPaths    *[]string         // nil: inspect local Git; non-nil: authoritative host diff
+	IncludeAgents   bool              // load only the selected root's native context file
+	ExactRoot       bool              // never discover ancestors; useful for CI checkouts
+	AllowedURLs     []string          // exact HTTPS references authorized by the host
+	HTTPTransport   http.RoundTripper // optional trusted host TLS transport, not repository config
 }
 
 // DiscoverRoot finds the nearest .directions entry, stopping at the first Git
@@ -90,6 +95,12 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	if options.Profile == "" {
 		options.Profile = "default"
 	}
+	if options.Operation == "" {
+		options.Operation = "general"
+	}
+	if !validName(options.Operation) {
+		return nil, fmt.Errorf("invalid operation name")
+	}
 	if !validName(options.Profile) {
 		return nil, fmt.Errorf("invalid profile name")
 	}
@@ -106,7 +117,7 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	if err != nil {
 		return nil, err
 	}
-	result := &ContextResult{Root: root, Warnings: []string{}}
+	result := &ContextResult{Root: root, Operation: options.Operation, Warnings: []string{}, Decisions: []Decision{}}
 	if root == "" {
 		return result, nil
 	}
@@ -142,7 +153,8 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 		return nil, err
 	}
 	defer sources.close()
-	doc, err := contextDocument(sources)
+	provenance := map[string][]string{}
+	doc, err := contextDocument(sources, provenance)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +171,7 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 			return nil, fmt.Errorf("profiles.%s.prompt: %w", options.Profile, err)
 		}
 		fmt.Fprintf(&content, "\n## Context: %s\n\n%s\n", name, data)
+		result.Decisions = append(result.Decisions, Decision{Kind: "prompt", ID: "profiles." + options.Profile, Sources: []string{name}, Scope: []string{"**"}, Included: true, Reason: "profile prompt"})
 	}
 	// Preferences are data, not permission to change a host-selected runtime.
 	if profile.Model != "" || profile.Thinking != "" {
@@ -168,9 +181,9 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	if err != nil {
 		return nil, err
 	}
-	needsDiff := false
+	needsDiff := options.Operation == "review"
 	for _, policy := range selected {
-		if policy.Triggers != nil {
+		if policy.Triggers != nil && (len(policy.Operations) == 0 || contains(policy.Operations, options.Operation)) {
 			needsDiff = true
 			break
 		}
@@ -178,7 +191,7 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	var changed []string
 	diffKnown := false
 	if options.ChangedPaths != nil {
-		changed = *options.ChangedPaths
+		changed = append([]string{}, (*options.ChangedPaths)...)
 		if len(changed) > 6000 {
 			return nil, fmt.Errorf("host diff exceeds 6000 paths")
 		}
@@ -190,7 +203,8 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 		diffKnown = true
 	} else if !needsDiff {
 		// Do not inspect Git or emit unknown-diff warnings when no eligible rule needs it.
-		diffKnown = true
+		// Diagnostics must not claim we observed a known empty diff.
+		diffKnown = false
 	} else if doc.Repo.VCS == "git" {
 		changed, err = changedPaths(ctx, root)
 		if err != nil {
@@ -201,39 +215,14 @@ func BuildContext(ctx context.Context, cwd string, options ContextOptions) (*Con
 	} else {
 		result.Warnings = append(result.Warnings, "repo.vcs=none: diff-triggered policy applicability is unknown (policies included conservatively).")
 	}
-	names := make([]string, 0, len(selected))
-	for name := range selected {
-		names = append(names, name)
+	changed = append(changed, options.AdditionalPaths...)
+	changed, err = normalizedPaths(changed)
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		policy := selected[name]
-		applicable := policy.Triggers == nil || !diffKnown
-		if policy.Triggers != nil {
-			for _, pattern := range policy.Triggers.Diff {
-				if err := validateGlob(pattern); err != nil {
-					return nil, fmt.Errorf("policy %s: %w", name, err)
-				}
-				for _, file := range changed {
-					if globMatch(pattern, file) {
-						applicable = true
-					}
-				}
-			}
-		}
-		if applicable {
-			fmt.Fprintf(&content, "\n## Policy: %s — %s\n", name, policy.Title)
-			if policy.DefaultImpact != "" {
-				fmt.Fprintf(&content, "Default impact: %s\n", policy.DefaultImpact)
-			}
-			if policy.Triggers != nil && !diffKnown {
-				content.WriteString("Diff applicability: unknown; included conservatively.\n")
-			}
-			fmt.Fprintf(&content, "\n%s\n", policy.Instructions)
-		}
-		if content.Len() > maxContextBytes {
-			return nil, fmt.Errorf("Directions context exceeds 64 KiB limit")
-		}
+	result.DiffKnown = diffKnown
+	if err := assembleSelection(reader, doc, selected, provenance, options, changed, diffKnown, result, &content); err != nil {
+		return nil, err
 	}
 	if content.Len() > maxContextBytes {
 		return nil, fmt.Errorf("Directions context exceeds 64 KiB limit")
@@ -271,7 +260,7 @@ func readRegular(root *os.Root, name string, limit int64) ([]byte, error) {
 }
 
 // contextDocument composes local and host-approved remote overrides.
-func contextDocument(sources *sourceReader) (*Document, error) {
+func contextDocument(sources *sourceReader, provenance map[string][]string) (*Document, error) {
 	baseName := ".directions/base.toml"
 	data, err := sources.read(baseName, maxFileBytes)
 	if err != nil {
@@ -281,6 +270,7 @@ func contextDocument(sources *sourceReader) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
+	recordPolicySources(provenance, base, baseName)
 	var merged map[string]any
 	if err := toml.Unmarshal(data, &merged); err != nil {
 		return nil, err
@@ -334,6 +324,7 @@ func contextDocument(sources *sourceReader) (*Document, error) {
 			if err := validateExplicitValues(fragment); err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
+			recordPolicySources(provenance, &shape, name)
 			mergeTables(merged, fragment)
 		}
 	}

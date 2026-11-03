@@ -126,6 +126,12 @@ canonical; singular `profile` and the old profile `policies` selector key are er
 Policies are grouped as `[policies.<group>.<policy>]`.
 Each policy requires nonempty `title` and `instructions` strings.
 
+`operations` is an optional nonempty array of host operation names, using the
+same lower-case name syntax as profiles. Omitted means all operations; supplied
+means at least one entry MUST equal the host-selected operation. Operation
+matching is independent of profile eligibility and combined with diff triggers
+using AND. The default operation is `general`; no operation grants capabilities.
+
 `default-impact` is optional and, when present, one of `low`, `medium`,
 `high`, or `blocking`. It expresses finding severity, not authorization.
 Consumers define and document how severity affects their behavior.
@@ -142,6 +148,21 @@ The Go parser validates trigger shape; the context assembler validates and
 matches globs when selecting policies.
 Directions instructions are data: they MUST NOT authorize code execution,
 credential access, or publication.
+
+### Directory-local review guidance and diagnostics
+
+For host operation `review`, the Go selector additionally includes root and
+changed-path-ancestor `REVIEWER.md` files. They are additive, independent of
+profile policy selection, and do not introduce native `AGENTS.md` inheritance.
+Central rules remain useful for cross-directory concerns. Unknown diffs MUST
+report incomplete directory coverage, not silently claim a complete review.
+
+CLI `context` and `explain` share selection. Diagnostics include source documents,
+scope, matching paths, and inclusion/exclusion reasons. Explicit host additional
+paths expand scope without pretending to discover semantic dependencies.
+See [the selection contract](clients/selection.md) for ordering, bounds,
+confinement, adapters, and trusted-snapshot requirements. The selector does not
+own agent execution; the existing Action is an optional consumer.
 
 ## 4. Overrides (proposed composition)
 
