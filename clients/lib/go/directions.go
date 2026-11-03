@@ -39,9 +39,10 @@ type Profile struct {
 }
 
 type Policy struct {
-	Title         string `toml:"title"`
-	Instructions  string `toml:"instructions"`
-	DefaultImpact string `toml:"default-impact"`
+	Operations    []string `toml:"operations"` // absent: all host operations
+	Title         string   `toml:"title"`
+	Instructions  string   `toml:"instructions"`
+	DefaultImpact string   `toml:"default-impact"`
 	Triggers      *struct {
 		Diff []string `toml:"diff"`
 	} `toml:"triggers"`
@@ -134,6 +135,11 @@ func parse(data []byte, fragment bool) (*Document, error) {
 			default:
 				return nil, fmt.Errorf("policies.%s.%s has an invalid default-impact", group, name)
 			}
+			for _, operation := range policy.Operations {
+				if !validName(operation) {
+					return nil, fmt.Errorf("policies.%s.%s has an invalid operation", group, name)
+				}
+			}
 			if policy.Triggers != nil {
 				if len(policy.Triggers.Diff) == 0 {
 					return nil, fmt.Errorf("policies.%s.%s requires nonempty triggers.diff", group, name)
@@ -194,6 +200,11 @@ func validateExplicitValues(keys map[string]any) error {
 		policies, _ := value.(map[string]any)
 		for _, value := range policies {
 			policy, _ := value.(map[string]any)
+			if operations, exists := policy["operations"]; exists {
+				if values, ok := operations.([]any); ok && len(values) == 0 {
+					return fmt.Errorf("operations must not be empty when supplied")
+				}
+			}
 			if err := checkStrings(policy, "default-impact"); err != nil {
 				return err
 			}

@@ -27,6 +27,7 @@ jobs:
           model: openai/gpt-6.1-sol
           api-key: ${{ secrets.OPENAI_API_KEY }}
           profile: review
+          operation: review
           github-capabilities: read,review-propose
           task: |
             Read the pull request, general discussion, and relevant pinned source.

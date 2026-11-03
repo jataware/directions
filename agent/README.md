@@ -17,6 +17,7 @@ by this implementation.
     model: openai/gpt-6.1-sol
     api-key: ${{ secrets.OPENAI_API_KEY }}
     profile: review
+    operation: review
     github-capabilities: read,review-propose
 ```
 
@@ -34,6 +35,7 @@ See [action.yml](action.yml) for the complete input contract.
 - Required: `task`, `api-key`.
 - Model: optional exact Pi catalog `provider/model`, default `openai/gpt-6.1-sol`.
 - Guidance: `workspace` (default GitHub workspace), `profile` (default `default`),
+  `operation` (default `general`; `review` adds ancestor `REVIEWER.md`),
   `allowed-urls` (whitespace-separated exact HTTPS references; empty by default).
 - Runtime: `thinking` (default `off`), `timeout-seconds` (default 600,
   maximum 1800), `max-turns` (default 16, maximum 100). Pi clamps thinking
@@ -49,7 +51,9 @@ Outputs point to a private directory beneath `RUNNER_TEMP`:
 
 - `response.md`: final Markdown, only on successful model completion.
 - `run.json`: status, failure stage, model/profile, active tools, warnings,
-  turn/tool-call counts. Provider error payloads are intentionally not logged.
+  turn/tool-call counts, and selection diagnostics (operation, diff-known state,
+  source/scope and inclusion/exclusion reasons). Provider error payloads are
+  intentionally not logged.
 - `github.json`: proposals, attempted writes, and positive receipts when
   the bundled GitHub extension was enabled. Proposals are not receipts.
 
@@ -72,6 +76,9 @@ shell or filesystem tools**.
 For local guidance, the Go client reads only the selected checkout root's
 Directions configuration and one native context file (AGENTS.override.md, AGENTS.md, AGENTS.MD, CLAUDE.md,
 or CLAUDE.MD, in that order). It does not load ancestor/home context in CI.
+Operation `review` additionally reads applicable directory-local `REVIEWER.md`
+files from that trusted checkout, independently of profile policy lists.
+The [shared selector](../clients/selection.md) is usable without this runner.
 Local prompt/override reads are bounded and traversal-confined using `os.Root`.
 HTTPS prompts/fragments require the workflow-owned `allowed-urls` input; never
 populate it from PR text or repository configuration. Include any `#sha256=...`

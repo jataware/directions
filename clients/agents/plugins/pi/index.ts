@@ -33,6 +33,10 @@ export default function directions(pi: ExtensionAPI) {
     default: "",
   });
 
+  for (const [name, fallback] of [["profile", "default"], ["operation", "general"]]) {
+    pi.registerFlag(`directions-${name}`, { description: `Host-selected Directions ${name}`, type: "string", default: fallback });
+  }
+
   let loaded: DirectionsContext | undefined;
   let lastWarning = "";
 
@@ -43,6 +47,10 @@ export default function directions(pi: ExtensionAPI) {
       const binary = pi.getFlag("directions-bin");
       const approved = pi.getFlag("directions-allow-urls");
       const args = ["context", ctx.cwd];
+      for (const name of ["profile", "operation"]) {
+        const value = pi.getFlag(`directions-${name}`);
+        if (typeof value === "string" && value) args.push(`--${name}`, value);
+      }
       if (typeof approved === "string") for (const url of approved.split(/\s+/).filter(Boolean)) args.push("--allow-url", url);
       const result = await pi.exec(typeof binary === "string" ? binary : "directions", args, {
         cwd: ctx.cwd,

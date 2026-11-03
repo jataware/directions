@@ -34,6 +34,10 @@ triggers.diff=["src/**/*.ts"]
 `);
   await writeFile(join(workspace, ".directions/contexts/review.md"), "DIRECTIONS_CONTEXT");
   await writeFile(join(workspace, "AGENTS.md"), "NATIVE_AGENTS_CONTEXT");
+  await mkdir(join(workspace, "src"), { recursive: true });
+  await writeFile(join(workspace, "src/REVIEWER.md"), "SCOPED_REVIEW_GUIDANCE");
+  await mkdir(join(workspace, "unrelated"), { recursive: true });
+  await writeFile(join(workspace, "unrelated/REVIEWER.md"), "UNRELATED_REVIEW_GUIDANCE");
   await mkdir(join(workspace, ".pi/extensions"), { recursive: true });
   await writeFile(join(workspace, ".pi/extensions/poison.ts"), `throw new Error("Repository extension must not load");`);
   await writeFile(join(workspace, ".pi/SYSTEM.md"), "MUST_NOT_LOAD_SYSTEM");
@@ -41,7 +45,7 @@ triggers.diff=["src/**/*.ts"]
   const eventPath = join(root, "event.json");
   await writeFile(eventPath, JSON.stringify({ pull_request: { number: 7 } }));
   const config = inputs({ INPUT_TASK: "Review the PR and retain a proposal.", INPUT_MODEL: "fixture/model", INPUT_API_KEY: "fake-model-key",
-    INPUT_GITHUB_TOKEN: "fake-github-key", INPUT_GITHUB_CAPABILITIES: "read,review-propose", INPUT_PROFILE: "review",
+    INPUT_GITHUB_TOKEN: "fake-github-key", INPUT_GITHUB_CAPABILITIES: "read,review-propose", INPUT_PROFILE: "review", INPUT_OPERATION: "review",
     INPUT_WORKSPACE: workspace, DIRECTIONS_BIN: bin, RUNNER_TEMP: root, GITHUB_REPOSITORY: "owner/repo", GITHUB_ACTOR: "maintainer",
     GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: eventPath });
   return { root, workspace, output, config, async close() { await rm(root, { recursive: true, force: true }); } };
@@ -92,7 +96,7 @@ test("inputs reject unsafe events/limits; redaction and approved extension paths
   assert.equal(defaults.provider, "openai");
   assert.equal(defaults.modelID, "gpt-6.1-sol");
   assert.equal(inputs({ INPUT_TASK: "Task", INPUT_MODEL: "" }).model, DEFAULT_MODEL);
-  for (const change of [{ GITHUB_EVENT_NAME: "pull_request_target" }, { INPUT_MAX_TURNS: "0" }, { INPUT_TIMEOUT_SECONDS: "2000" }, { INPUT_MODEL: "not-a-ref" }, { INPUT_THINKING: "unknown" }, { INPUT_GITHUB_CAPABILITIES: "all" }]) assert.throws(() => inputs({ ...basic, ...change }));
+  for (const change of [{ GITHUB_EVENT_NAME: "pull_request_target" }, { INPUT_MAX_TURNS: "0" }, { INPUT_TIMEOUT_SECONDS: "2000" }, { INPUT_MODEL: "not-a-ref" }, { INPUT_THINKING: "unknown" }, { INPUT_OPERATION: "bad operation" }, { INPUT_GITHUB_CAPABILITIES: "all" }]) assert.throws(() => inputs({ ...basic, ...change }));
   assert.equal(redact("prefix abcdef abc", ["abc", "abcdef"]), "prefix [REDACTED] [REDACTED]");
   const f = await fixture();
   try {
@@ -129,6 +133,8 @@ export default function(pi) {
     assert.match(text, /DIRECTIONS_CONTEXT/);
     assert.match(text, /NATIVE_AGENTS_CONTEXT/);
     assert.match(text, /TRIGGERED_DIFF_POLICY/);
+    assert.match(text, /SCOPED_REVIEW_GUIDANCE/);
+    assert.ok(!text.includes("UNRELATED_REVIEW_GUIDANCE"));
     assert.match(text, /EXTERNAL_EXTENSION/);
     assert.ok(!text.includes("MUST_NOT_LOAD_SYSTEM"));
     assert.ok(!text.includes("fake-github-key"));
@@ -146,6 +152,9 @@ export default function(pi) {
     });
     assert.deepEqual(server.errors, []);
     assert.equal(result.status, "success");
+    assert.equal(result.selection.operation, "review");
+    assert.equal(result.selection.diffKnown, true);
+    assert.ok(result.selection.decisions.some((item) => item.id === "src/REVIEWER.md" && item.included));
     assert.match(await readFile(join(f.output, "response.md"), "utf8"), /\[REDACTED\] \[REDACTED\]/);
     const records = JSON.parse(await readFile(join(f.output, "github.json"), "utf8"));
     assert.equal(records[0].type, "proposal");

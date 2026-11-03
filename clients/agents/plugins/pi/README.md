@@ -34,6 +34,15 @@ Put the built CLI on your trusted PATH, or supply `--directions-bin` on startup.
 The extension does not install itself or modify any host settings. Review the
 extension/package before granting project trust.
 
+For review sessions, add `--directions-profile review --directions-operation review`
+(the named profile must exist). These independent host flags default to `default`
+and `general`. Review mode includes applicable ancestor `REVIEWER.md` files;
+other operations leave native general instructions alone. Selection is ordinary
+CLI work in the existing hooks, not a second agent. Use
+`directions explain DIRECTORY --operation review` to inspect decisions.
+See [the shared selection contract](../../../selection.md) for source/scope,
+limits, and diff semantics.
+
 ## Behavior
 
 - Discover the nearest `.directions/` from Pi's working directory upward,
@@ -52,8 +61,8 @@ extension/package before granting project trust.
 - All policies are eligible by default. `profiles.default.whitelist` selects
   only matching policies; `profiles.default.blacklist` excludes matches. They
   cannot coexist, including empty arrays. An empty whitelist selects none.
-  No trigger means an eligible policy is always included. Diff triggers match
-  staged changes, unstaged changes, and
+  No diff trigger means an operation-matching eligible policy is always included.
+  Diff triggers match staged changes, unstaged changes, and
   untracked nonignored filenames. Both sides of renames and deletions count.
   Paths are relative to the selected Directions root, even when it is nested
   inside a Git repository. Unborn repositories are supported.

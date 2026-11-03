@@ -12,6 +12,9 @@ inputs:
   api-key:
     description: Credential for the selected provider.
     required: true
+  operation:
+    description: Host operation; review adds ancestor REVIEWER.md guidance. Independent of profile.
+    default: general
   profile:
     description: Directions profile to load from the inspected workspace.
     default: default
@@ -90,6 +93,7 @@ runs:
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_API_KEY: ${{ inputs.api-key }}
         INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_OPERATION: ${{ inputs.operation }}
         INPUT_THINKING: ${{ inputs.thinking }}
         INPUT_WORKSPACE: ${{ inputs.workspace }}
         INPUT_EXTENSIONS: ${{ inputs.extensions }}

@@ -91,6 +91,20 @@ root context file), `--exact-root` (no ancestor discovery), and repeatable
 The action uses these flags so a trusted guidance checkout and a pinned PR diff
 remain separate.
 
+## Harness-neutral selection
+
+Directions does not need to run an agent to select guidance. Use
+`directions context DIRECTORY --operation review` for review-only policies and
+ancestor `REVIEWER.md` files, or `directions explain DIRECTORY --operation review`
+for source/scope, matching paths, and inclusion/exclusion reasons without prompt
+bodies. Repeat `--path PATH` to explicitly expand scope beyond the diff.
+Profiles and operations are independent; existing callers default to `general`.
+
+The Pi hook and optional Action share this CLI/library selection logic. Other
+harnesses can consume its JSON without using the Action or Pi runner. See the
+[selection contract and trust boundaries](clients/selection.md) for examples,
+limits, unknown-diff behavior, and trusted-checkout requirements.
+
 ## Model preferences
 
 Profiles may specify `model = "openai/gpt-6.1-sol"` and `thinking = "medium"`, or
